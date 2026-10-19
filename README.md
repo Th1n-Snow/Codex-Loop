@@ -63,4 +63,3 @@ python -m venv .venv
 Codex Loop schedules small, ordinary Codex requests to prepare a usage window ahead of work. It provides daily time slots, read-only quota refresh, ephemeral request self-tests, and light/dark themes with Chinese/English UI.
 
 Extract the complete Windows x64 release folder and run `CodexLoop.exe`; Python is not required. Install and sign in to Codex separately. Automation and start-at-login are disabled by default. Keep the computer awake and connected. This does not increase quota or bypass restrictions. Personal state is stored under `%LOCALAPPDATA%\CodexLoop`. The code is MIT licensed; bundled dependencies retain their own licenses.
-

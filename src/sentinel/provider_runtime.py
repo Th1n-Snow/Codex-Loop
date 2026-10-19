@@ -1,0 +1,372 @@
+"""In-process Codex operations for the windowed desktop application."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import time
+import threading
+from typing import Callable, Protocol
+
+from .app_state import ProviderViewState
+from .chain import ChainCoordinator, ChainPolicy
+from .classifier import classify
+from .history import SafeHistory
+from .history import HistoryStateError
+from .models import select_trigger_model
+from .providers import CompatibilityResult
+from .protocol import AppServerProtocolError
+from .quota import QuotaSnapshot, normalize_rate_limits, select_five_hour, select_weekly
+from .transport import SentinelRuntimeError
+from .trigger import AppServerTrigger, TriggerConfig, dedicated_trigger_workspace
+
+
+class RuntimeSession(Protocol):
+    codex_version: str
+    client: object
+
+    def close(self) -> None: ...
+
+
+@dataclass(frozen=True)
+class ProviderOperationResult:
+    outcome: str
+    state: ProviderViewState
+    request_possibly_sent: bool
+
+
+@dataclass(frozen=True)
+class ChainOutcomePolicy:
+    category: str
+    view_status: str
+    read_only_recovery: bool
+    future_trigger_permitted: bool
+    user_attention: bool
+
+
+_READY_OUTCOMES = {"ALREADY_ANCHORED", "ANCHOR_VERIFIED"}
+_RECOVERABLE_OUTCOMES = {
+    "EVIDENCE_TOO_WEAK",
+    "ROLLOVER_BOUNDARY_UNKNOWN",
+    "TRIGGER_NOT_SENT",
+    "RESET_BUFFER",
+    "NOT_ELIGIBLE",
+}
+_PROTECTED_OUTCOMES = {
+    "WEEKLY_UNAVAILABLE",
+    "WEEKLY_EXHAUSTED",
+    "BOOTSTRAP_USAGE_UNSUITABLE",
+}
+_GUARDED_OUTCOMES = {
+    "ATTEMPT_ALREADY_RECORDED",
+    "BOOTSTRAP_COOLDOWN",
+    "VERIFICATION_UNAVAILABLE",
+    "ANCHOR_NOT_VERIFIED",
+}
+CHAIN_RESULT_OUTCOMES = frozenset().union(
+    _READY_OUTCOMES,
+    _RECOVERABLE_OUTCOMES,
+    _PROTECTED_OUTCOMES,
+    _GUARDED_OUTCOMES,
+    {"CONSENT_REQUIRED", "DRY_RUN"},
+)
+
+
+def chain_outcome_policy(outcome: str) -> ChainOutcomePolicy:
+    """Describe what the desktop may do after one bounded chain operation.
+
+    The history reservation remains the authority on duplicate turns. This
+    policy only controls presentation and whether later read-only recovery is
+    allowed; it never bypasses the chain coordinator's evidence gates.
+    """
+    if outcome in _READY_OUTCOMES:
+        return ChainOutcomePolicy("READY", "Ready", False, False, False)
+    if outcome in _RECOVERABLE_OUTCOMES:
+        return ChainOutcomePolicy("RECOVERABLE", "Waiting", True, True, False)
+    if outcome in _PROTECTED_OUTCOMES:
+        return ChainOutcomePolicy("PROTECTED", "Protected", True, True, False)
+    if outcome in _GUARDED_OUTCOMES:
+        return ChainOutcomePolicy("GUARDED", "Guarded", True, False, False)
+    return ChainOutcomePolicy(
+        "USER_ATTENTION", "Needs attention", False, False, True
+    )
+
+
+class CodexOperationRunner:
+    def __init__(
+        self,
+        history: SafeHistory,
+        *,
+        session_factory: Callable[[], RuntimeSession] | None = None,
+        clock: Callable[[], float] = time.time,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self.history = history
+        if session_factory is None:
+            from .cli import connect
+
+            session_factory = connect
+        self._session_factory = session_factory
+        self._clock = clock
+        self._sleep = sleep
+        self._prepared_lock = threading.Lock()
+        self._prepared = None
+
+    def prepare_connection(self, runtime_identity: str) -> bool:
+        """Initialize a reusable client without creating a thread or a turn."""
+        session = self._session_factory()
+        try:
+            session.client.read_rate_limits()
+            if select_trigger_model(session.client.list_models()) is None:
+                return False
+            prepared = (session, runtime_identity, self._clock())
+            with self._prepared_lock:
+                old, self._prepared = self._prepared, prepared
+            session = None
+            expiry = threading.Timer(240, self._expire_prepared, args=(prepared,))
+            expiry.daemon = True
+            expiry.start()
+            if old is not None:
+                old[0].close()
+            return True
+        finally:
+            if session is not None:
+                session.close()
+
+    def _expire_prepared(self, expected) -> None:
+        with self._prepared_lock:
+            if self._prepared is not expected:
+                return
+            self._prepared = None
+        expected[0].close()
+
+    def discard_prepared(self) -> None:
+        with self._prepared_lock:
+            old, self._prepared = self._prepared, None
+        if old is not None:
+            old[0].close()
+
+    def _take_prepared(self, runtime_identity: str):
+        with self._prepared_lock:
+            old, self._prepared = self._prepared, None
+        if old is not None:
+            if old[1] == runtime_identity and 0 <= self._clock() - old[2] <= 240:
+                return old[0], old[2]
+            old[0].close()
+        return self._session_factory(), None
+
+    def probe(self, runtime_identity: str) -> CompatibilityResult:
+        session = None
+        try:
+            session = self._session_factory()
+            observations: list[QuotaSnapshot] = []
+            for index in range(4):
+                observed_at = self._clock()
+                raw = session.client.read_rate_limits()
+                session.client.drain_rate_limit_notifications()
+                observations.append(normalize_rate_limits(raw, observed_at))
+                if index < 3:
+                    self._sleep(10.0)
+            models = session.client.list_models()
+            choice = select_trigger_model(models)
+            classification = classify(observations)
+            for snapshot in observations:
+                self.history.record_observation(
+                    snapshot, classification, session.codex_version
+                )
+            return CompatibilityResult.from_capabilities(
+                runtime_identity=runtime_identity,
+                initialized=True,
+                rate_limits_available=all(
+                    snapshot.valid_structure
+                    and select_weekly(snapshot) is not None
+                    and select_five_hour(snapshot).status != "ambiguous"
+                    for snapshot in observations
+                ),
+                model_catalog_available=bool(models),
+                suitable_model_available=choice is not None,
+            )
+        except (SentinelRuntimeError, AppServerProtocolError, HistoryStateError) as exc:
+            return CompatibilityResult(
+                False, "Needs attention",
+                "The Codex compatibility check stopped safely. No automatic request was sent.",
+                runtime_identity, failure_category=exc.category,
+            )
+        except Exception:
+            return CompatibilityResult(
+                False,
+                "Needs attention",
+                "The Codex compatibility check failed safely. No automatic request was sent.",
+                runtime_identity,
+                failure_category="unexpected_error",
+            )
+        finally:
+            if session is not None:
+                session.close()
+
+    def sync(self, runtime_identity: str) -> ProviderOperationResult:
+        """Refresh quota evidence without discovering models or starting a turn."""
+        session = self._session_factory()
+        try:
+            observations: list[QuotaSnapshot] = []
+            for index in range(4):
+                observed_at = self._clock()
+                raw = session.client.read_rate_limits()
+                session.client.drain_rate_limit_notifications()
+                observations.append(normalize_rate_limits(raw, observed_at))
+                if index < 3:
+                    self._sleep(10.0)
+            classification = classify(observations)
+            for snapshot in observations:
+                self.history.record_observation(
+                    snapshot, classification, session.codex_version
+                )
+            latest = observations[-1]
+            selected = select_five_hour(latest).window
+            weekly = select_weekly(latest)
+            conclusive = classification.state in {
+                "ANCHORED",
+                "UNANCHORED",
+                "EXHAUSTED",
+            } or (classification.state == "ABSENT" and all(
+                snapshot.valid_weekly_only for snapshot in observations
+            ))
+            status = {
+                "ANCHORED": "Ready",
+                "UNANCHORED": "Waiting",
+                "EXHAUSTED": "Waiting",
+                "ABSENT": "Waiting" if conclusive else "Needs attention",
+            }.get(classification.state, "Needs attention")
+            detail = {
+                "ANCHORED": "Codex usage was updated from a fixed reset clock.",
+                "UNANCHORED": "Codex usage was updated; no fixed reset clock is active.",
+                "EXHAUSTED": "Codex reports that the five-hour window is exhausted.",
+                "ABSENT": (
+                    "Codex isn't reporting a five-hour window right now. There's no five-hour start to schedule."
+                    if conclusive else "Codex usage could not be confirmed safely."
+                ),
+            }.get(classification.state, "Codex usage could not be confirmed safely.")
+            state = ProviderViewState(
+                provider_id="codex",
+                display_name="Codex",
+                installed=True,
+                automation_supported=True,
+                status=status,
+                detail=detail,
+                runtime_identity=runtime_identity,
+                reset_at=selected.resets_at if selected else None,
+                last_verified_at=(
+                    latest.observed_at if classification.state == "ANCHORED" else None
+                ),
+                used_percent=selected.used_percent if selected else None,
+                usage_checked_at=latest.observed_at,
+                weekly_used_percent=weekly.used_percent if weekly else None,
+                weekly_reset_at=weekly.resets_at if weekly else None,
+                quota_state=classification.state,
+                quota_evidence="valid_weekly_only" if classification.state == "ABSENT" and conclusive else "inconclusive",
+            )
+            return ProviderOperationResult(
+                "SYNC_UPDATED" if conclusive else "SYNC_INCONCLUSIVE",
+                state,
+                False,
+            )
+        finally:
+            session.close()
+
+    def run(self, mode: str, *, runtime_identity: str, scheduled_at: float | None = None) -> ProviderOperationResult:
+        if mode not in {"bootstrap", "rollover"}:
+            raise ValueError("Unsupported Codex operation mode.")
+        started_at = self._clock()
+        session, prepared_at = self._take_prepared(runtime_identity)
+        all_observations: list[QuotaSnapshot] = []
+        try:
+            trigger = AppServerTrigger(
+                session.client,
+                dedicated_trigger_workspace(self.history.path),
+                TriggerConfig(),
+                clock=self._clock,
+            )
+
+            trigger.stage_times = {"planned_at": scheduled_at,
+                                   "preflight_started_at": started_at,
+                                   "connection_prepared_at": prepared_at}
+
+            def collect() -> list[QuotaSnapshot]:
+                observations: list[QuotaSnapshot] = []
+                for index in range(4):
+                    observed_at = self._clock()
+                    raw = session.client.read_rate_limits()
+                    session.client.drain_rate_limit_notifications()
+                    observations.append(normalize_rate_limits(raw, observed_at))
+                    if index < 3:
+                        self._sleep(10.0)
+                classification = classify(observations)
+                for snapshot in observations:
+                    self.history.record_observation(
+                        snapshot, classification, session.codex_version
+                    )
+                all_observations.extend(observations)
+                return observations
+
+            preflight = collect()
+            def collect_after_settling() -> list[QuotaSnapshot]:
+                self._sleep(10.0)
+                return collect()
+            coordinator = ChainCoordinator(trigger, self.history, ChainPolicy())
+            if mode == "bootstrap":
+                result = coordinator.run_bootstrap(
+                    preflight, collect_after_settling, confirmed=True, dry_run=False
+                )
+            else:
+                result = coordinator.run(preflight, collect_after_settling, dry_run=False)
+            state = self._state_from_result(
+                result.status,
+                result.reason,
+                result.classification.state,
+                all_observations,
+                runtime_identity,
+            )
+            return ProviderOperationResult(
+                result.status, state, result.request_possibly_sent
+            )
+        finally:
+            session.close()
+
+    @staticmethod
+    def _state_from_result(
+        outcome: str,
+        reason: str,
+        classification_state: str,
+        observations: list[QuotaSnapshot],
+        runtime_identity: str,
+    ) -> ProviderViewState:
+        latest = observations[-1] if observations else None
+        selected = select_five_hour(latest).window if latest is not None else None
+        weekly = select_weekly(latest) if latest is not None else None
+        policy = chain_outcome_policy(outcome)
+        return ProviderViewState(
+            provider_id="codex",
+            display_name="Codex",
+            installed=True,
+            automation_supported=True,
+            status=policy.view_status,
+            detail=reason,
+            runtime_identity=runtime_identity,
+            runtime_version=None,
+            reset_at=selected.resets_at if selected else None,
+            last_verified_at=(
+                latest.observed_at if policy.category == "READY" and latest else None
+            ),
+            last_action=outcome,
+            used_percent=selected.used_percent if selected else None,
+            usage_checked_at=latest.observed_at if latest else None,
+            weekly_used_percent=weekly.used_percent if weekly else None,
+            weekly_reset_at=weekly.resets_at if weekly else None,
+            quota_state=classification_state,
+            outcome_category=policy.category,
+            quota_evidence=(
+                "valid_weekly_only"
+                if classification_state == "ABSENT" and len(observations) >= 4
+                and all(snapshot.valid_weekly_only for snapshot in observations)
+                else "inconclusive"
+            ),
+        )

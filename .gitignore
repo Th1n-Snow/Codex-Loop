@@ -1,0 +1,36 @@
+# Personal agent config
+AGENTS.md
+CLAUDE.md
+.claude/
+.codex/
+.agents/
+
+# Secrets - never commit
+.env
+.env.*
+*.pem
+*.key
+*credentials*
+*secret*
+
+# Python and local runtime state
+__pycache__/
+*.pyc
+.venv/
+.build-venv/
+*.egg-info/
+dist/
+build/
+packaging/windowsentinel.ico
+packaging/version_info.txt
+.coverage
+.pytest_cache/
+.ruff_cache/
+artifacts/
+
+# Sentinel observations are user-local, never repository data
+*.jsonl
+
+# Platform noise
+.DS_Store
+Thumbs.db

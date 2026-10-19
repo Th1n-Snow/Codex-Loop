@@ -1,0 +1,24 @@
+name: Request a feature
+description: Have an idea? Tell us what would make Codex Loop more useful.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping make Codex Loop better.
+
+        Please don't include passwords, API keys, private Codex conversations, or other sensitive information.
+  - type: textarea
+    id: usefulness
+    attributes:
+      label: What would make Codex Loop more useful for you?
+      placeholder: Tell us what you wish Codex Loop could do.
+    validations:
+      required: true
+  - type: textarea
+    id: anything_else
+    attributes:
+      label: Anything else you'd like to add?
+      placeholder: Add any extra context or ideas here.
+    validations:
+      required: false

@@ -1,0 +1,20 @@
+name: Windows release checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -c requirements-build.txt -e ".[build,test]"
+      - run: python scripts/verify-release.py
+      - run: python -m compileall -q src
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-checks
+          path: artifacts/release-checks

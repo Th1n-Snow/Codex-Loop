@@ -1,0 +1,559 @@
+"""Presentation-safe state and local automation decisions for the desktop app."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, replace
+from datetime import datetime
+import errno
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import tempfile
+from typing import Any
+
+from .host import is_windows, xdg_data_home, xdg_state_home
+from .product import PRODUCT
+from .schedule import (
+    CONTINUOUS,
+    DAILY,
+    RESET_BUFFER_SECONDS,
+    SCHEDULE_MODES,
+    WEEKLY,
+    MULTI,
+    normalize_multi_times,
+    normalize_weekly_times,
+    schedule_summary,
+    tomorrow_first_start,
+)
+
+
+@dataclass(frozen=True)
+class AppSettings:
+    automation_enabled: bool = False
+    start_with_windows: bool = False
+    first_run_complete: bool = False
+    compatible_runtime_identities: dict[str, str] | None = None
+    checked_runtime_identities: dict[str, str] | None = None
+    schedule_mode: str = CONTINUOUS
+    daily_start_hour: int = 4
+    daily_start_minute: int = 0
+    weekly_start_times: tuple[tuple[int, int], ...] | None = None
+    automation_paused_until: float | None = None
+    multi_start_times: tuple[tuple[int, int], ...] = ((12, 0), (17, 0), (21, 0))
+    multi_last_slot: float | None = None
+    multi_last_status: str = ""
+    multi_pending_slot: float | None = None
+    multi_pending_reset: float | None = None
+    multi_pending_due: float | None = None
+    multi_pending_runtime: str = ""
+    theme_mode: str = "system"
+    ui_language: str = "zh_CN"
+
+    def pause_active(self, now: float) -> bool:
+        return (
+            self.automation_enabled
+            and self.automation_paused_until is not None
+            and now < self.automation_paused_until
+        )
+
+    def tomorrow_first_start(self, now: float) -> float | None:
+        try:
+            return tomorrow_first_start(
+                self.schedule_mode, now=now,
+                hour=self.daily_start_hour, minute=self.daily_start_minute,
+                weekly_times=self.weekly_start_times,
+                multi_times=self.multi_start_times,
+            )
+        except (OSError, OverflowError, ValueError):
+            return None
+
+    def __post_init__(self) -> None:
+        if self.compatible_runtime_identities is None:
+            object.__setattr__(self, "compatible_runtime_identities", {})
+        if self.checked_runtime_identities is None:
+            object.__setattr__(self, "checked_runtime_identities", {})
+
+
+@dataclass(frozen=True)
+class ProviderViewState:
+    provider_id: str
+    display_name: str
+    installed: bool
+    automation_supported: bool
+    status: str
+    detail: str
+    runtime_identity: str | None = None
+    runtime_version: str | None = None
+    reset_at: int | None = None
+    last_verified_at: float | None = None
+    last_action: str | None = None
+    used_percent: float | None = None
+    usage_checked_at: float | None = None
+    weekly_used_percent: float | None = None
+    weekly_reset_at: int | None = None
+    automation_blocked_until: float | None = None
+    retry_after_restart: bool = False
+    quota_state: str | None = None
+    outcome_category: str | None = None
+    recovery_signature: str | None = None
+    recovery_attempts: int = 0
+    recovery_not_before: float | None = None
+    quota_evidence: str | None = None
+    compatibility_incident_id: str | None = None
+    compatibility_failure_category: str | None = None
+    compatibility_attempts: int = 0
+    compatibility_started_at: float | None = None
+    compatibility_next_retry_at: float | None = None
+    compatibility_notified: bool = False
+    compatibility_blocked_notified: bool = False
+    compatibility_terminal_notified: bool = False
+    compatibility_blocked_opportunity: str | None = None
+
+    @classmethod
+    def waiting(
+        cls,
+        provider_id: str,
+        display_name: str,
+        *,
+        installed: bool,
+        runtime_identity: str | None = None,
+    ) -> "ProviderViewState":
+        return cls(
+            provider_id,
+            display_name,
+            installed,
+            True,
+            "Waiting" if installed else "Needs attention",
+            (
+                "Detected. Waiting for a verified window."
+                if installed
+                else f"{display_name} was not found on this PC."
+            ),
+            runtime_identity,
+        )
+
+    def with_reset(self, reset_at: int, *, verified_at: float) -> "ProviderViewState":
+        return replace(
+            self,
+            status="Ready" if reset_at > verified_at else "Waiting",
+            detail="The last verified five-hour window is ready.",
+            reset_at=int(reset_at),
+            last_verified_at=float(verified_at),
+        )
+
+
+def preserve_verified_boundary(
+    previous: ProviderViewState, observed: ProviderViewState,
+) -> ProviderViewState:
+    """Keep the scheduling boundary while a newer reading reports a sliding clock."""
+    if (previous.runtime_identity == observed.runtime_identity
+            and previous.reset_at is not None
+            and previous.last_verified_at is not None
+            and observed.quota_state == "UNANCHORED"):
+        return replace(observed, reset_at=previous.reset_at,
+                       last_verified_at=previous.last_verified_at)
+    return observed
+
+
+@dataclass(frozen=True)
+class AutomationDecision:
+    action: str
+    reason: str
+
+
+def automation_decision(
+    enabled: bool,
+    state: ProviderViewState,
+    *,
+    now: float,
+    compatible_runtime_identity: str | None = None,
+    checked_runtime_identity: str | None = None,
+    schedule_mode: str = CONTINUOUS,
+    daily_hour: int = 4,
+    daily_minute: int = 0,
+    weekly_times: tuple[tuple[int, int], ...] | None = None,
+    timezone: Any = None,
+    paused_until: float | None = None,
+    multi_times: tuple[tuple[int, int], ...] = (),
+    multi_last_slot: float | None = None,
+) -> AutomationDecision:
+    if not enabled:
+        return AutomationDecision("NONE", "Automation is off.")
+    if paused_until is not None and now < paused_until:
+        return AutomationDecision("WAIT", "Automation is temporarily paused.")
+    if not state.installed:
+        return AutomationDecision("NONE", "Provider automation is unavailable.")
+    if state.compatibility_next_retry_at is not None:
+        if now >= state.compatibility_next_retry_at:
+            return AutomationDecision("PROBE", "Read-only compatibility recovery is due.")
+        return AutomationDecision("WAIT", "Read-only compatibility recovery is backing off.")
+    if not state.automation_supported:
+        return AutomationDecision("NONE", "Provider automation is unavailable.")
+    if state.status == "Needs attention":
+        return AutomationDecision("NONE", "Provider needs explicit attention.")
+    if state.recovery_not_before is not None and now < state.recovery_not_before:
+        return AutomationDecision("WAIT", "Read-only recovery is backing off.")
+    if state.automation_blocked_until is not None and now < state.automation_blocked_until:
+        return AutomationDecision("WAIT", "A guarded provider action is already recorded.")
+    if state.runtime_identity != compatible_runtime_identity:
+        if state.runtime_identity == checked_runtime_identity:
+            return AutomationDecision("NONE", "Provider compatibility needs attention.")
+        return AutomationDecision("PROBE", "Provider runtime capabilities must be checked.")
+    if schedule_mode == MULTI:
+        summary = schedule_summary(MULTI, boundary_reset_at=state.reset_at,
+                                   now=now, multi_times=multi_times,
+                                   multi_last_slot=multi_last_slot, timezone=timezone)
+        if not summary.due:
+            return AutomationDecision("WAIT", "等待下一个设定时间")
+        # Give an almost-expired window its normal rollover safety buffer.
+        if (state.reset_at is not None and state.last_verified_at is not None
+                and summary.next_action_at is not None
+                and abs(state.reset_at - summary.next_action_at) <= 60
+                and now < state.reset_at + RESET_BUFFER_SECONDS):
+            return AutomationDecision("WAIT", "等待当前窗口的重置缓冲")
+        return AutomationDecision("TIMED", "已到设定的预热时间")
+    if state.reset_at is None:
+        return AutomationDecision("BOOTSTRAP", "No verified window is known yet.")
+    try:
+        schedule = schedule_summary(
+            schedule_mode,
+            boundary_reset_at=state.reset_at,
+            now=now,
+            hour=daily_hour,
+            minute=daily_minute,
+            weekly_times=weekly_times,
+            timezone=timezone,
+        )
+    except (OSError, OverflowError, ValueError):
+        return AutomationDecision("NONE", "The saved schedule evidence is unusable.")
+    if schedule.due:
+        if schedule_mode == DAILY:
+            return AutomationDecision(
+                "ROLLOVER", "The selected daily start is due after the verified reset."
+            )
+        if schedule_mode == WEEKLY:
+            if schedule.phase == "scheduled_first_start":
+                return AutomationDecision(
+                    "ROLLOVER",
+                    "The scheduled weekly first start is due after the verified reset.",
+                )
+            return AutomationDecision(
+                "ROLLOVER", "The daytime reset boundary has passed."
+            )
+        return AutomationDecision("ROLLOVER", "The verified reset boundary has passed.")
+    if schedule_mode == DAILY and now >= state.reset_at + RESET_BUFFER_SECONDS:
+        return AutomationDecision("WAIT", "Waiting for the selected daily start time.")
+    if schedule_mode == WEEKLY and schedule.phase == "overnight_pause":
+        return AutomationDecision(
+            "WAIT", "Waiting through the overnight pause for the next scheduled start."
+        )
+    return AutomationDecision("WAIT", "The countdown is maintained locally.")
+
+
+def format_countdown(reset_at: int | None, now: float) -> str:
+    if reset_at is None:
+        return "Not verified yet"
+    remaining = int(reset_at - now)
+    if remaining <= 0:
+        return "Reset reached"
+    hours, remainder = divmod(remaining, 3600)
+    minutes = remainder // 60
+    return f"{hours}h {minutes:02d}m"
+
+
+_TEXT_FIELDS = ("provider_id", "display_name", "status", "detail")
+_OPTIONAL_TEXT_FIELDS = (
+    "runtime_identity",
+    "runtime_version",
+    "last_action",
+    "quota_state",
+    "outcome_category",
+    "recovery_signature",
+    "quota_evidence",
+    "compatibility_incident_id",
+    "compatibility_failure_category",
+    "compatibility_blocked_opportunity",
+)
+_BOOL_FIELDS = (
+    "installed", "automation_supported", "retry_after_restart",
+    "compatibility_notified", "compatibility_blocked_notified",
+    "compatibility_terminal_notified",
+)
+_INT_FIELDS = ("reset_at", "weekly_reset_at")
+_FLOAT_FIELDS = (
+    "last_verified_at",
+    "used_percent",
+    "usage_checked_at",
+    "weekly_used_percent",
+    "automation_blocked_until",
+    "recovery_not_before",
+    "compatibility_started_at",
+    "compatibility_next_retry_at",
+)
+
+
+def _coerce_provider_fields(value: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a cached provider record so bad types cannot reach the UI.
+
+    A dataclass does not enforce its annotations, so a hand-edited or partially
+    written state file could previously load a string where a timestamp was
+    expected and raise a TypeError inside the one-second clock tick. Unusable
+    fields are dropped back to their defaults instead.
+    """
+    cleaned: dict[str, Any] = {}
+    for key, raw in value.items():
+        if key in _TEXT_FIELDS:
+            if not isinstance(raw, str):
+                raise ValueError(f"{key} must be text")
+            cleaned[key] = raw
+        elif key in _OPTIONAL_TEXT_FIELDS:
+            cleaned[key] = raw if isinstance(raw, str) else None
+        elif key in _BOOL_FIELDS:
+            cleaned[key] = raw is True
+        elif key in _INT_FIELDS:
+            cleaned[key] = int(raw) if _is_finite_number(raw) else None
+        elif key in _FLOAT_FIELDS:
+            cleaned[key] = float(raw) if _is_finite_number(raw) else None
+        elif key in {"recovery_attempts", "compatibility_attempts"}:
+            cleaned[key] = (
+                int(raw)
+                if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0
+                else 0
+            )
+        else:
+            raise ValueError(f"unknown provider field {key}")
+    return cleaned
+
+
+def _is_finite_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return value == value and value not in (float("inf"), float("-inf"))
+
+
+def is_valid_daily_start_time(hour: Any, minute: Any) -> bool:
+    return (
+        isinstance(hour, int)
+        and not isinstance(hour, bool)
+        and 0 <= hour <= 23
+        and isinstance(minute, int)
+        and not isinstance(minute, bool)
+        and 0 <= minute <= 59
+    )
+
+
+class AppStateStore:
+    def __init__(self, path: Path | None = None):
+        self.path = path or default_app_state_path()
+
+    def load(self) -> AppSettings:
+        payload = self._read()
+        settings = payload.get("settings") if isinstance(payload, dict) else None
+        if not isinstance(settings, dict):
+            return AppSettings()
+        identities = settings.get("compatible_runtime_identities")
+        safe_identities = (
+            {str(key): str(value) for key, value in identities.items()}
+            if isinstance(identities, dict)
+            else {}
+        )
+        checked = settings.get("checked_runtime_identities")
+        safe_checked = (
+            {str(key): str(value) for key, value in checked.items()}
+            if isinstance(checked, dict)
+            else {}
+        )
+        schedule_mode = settings.get("schedule_mode")
+        if schedule_mode not in SCHEDULE_MODES:
+            schedule_mode = CONTINUOUS
+        daily_hour = settings.get("daily_start_hour")
+        daily_minute = settings.get("daily_start_minute")
+        if not is_valid_daily_start_time(daily_hour, daily_minute):
+            daily_hour, daily_minute = 4, 0
+        try:
+            weekly_times = normalize_weekly_times(
+                settings.get("weekly_start_times")
+            )
+        except ValueError:
+            weekly_times = None
+        try:
+            multi_times = normalize_multi_times(settings.get("multi_start_times", ((12, 0), (17, 0), (21, 0))))
+        except ValueError:
+            multi_times = ()
+        multi_last_slot = settings.get("multi_last_slot")
+        if not _is_finite_number(multi_last_slot) or multi_last_slot < 0:
+            multi_last_slot = None
+        multi_status = settings.get("multi_last_status", "")
+        if not isinstance(multi_status, str):
+            multi_status = ""
+        paused_until = settings.get("automation_paused_until")
+        invalid_pause = False
+        if paused_until is not None:
+            try:
+                if not _is_finite_number(paused_until) or paused_until <= 0:
+                    raise ValueError("invalid pause timestamp")
+                datetime.fromtimestamp(paused_until)
+            except (OSError, OverflowError, ValueError):
+                invalid_pause = True
+                paused_until = None
+        return AppSettings(
+            automation_enabled=settings.get("automation_enabled") is True and not invalid_pause,
+            start_with_windows=settings.get("start_with_windows") is True,
+            first_run_complete=settings.get("first_run_complete") is True,
+            compatible_runtime_identities=safe_identities,
+            checked_runtime_identities=safe_checked,
+            schedule_mode=schedule_mode,
+            daily_start_hour=daily_hour,
+            daily_start_minute=daily_minute,
+            weekly_start_times=weekly_times,
+            automation_paused_until=paused_until,
+            multi_start_times=multi_times,
+            multi_last_slot=multi_last_slot,
+            multi_last_status=multi_status[:200],
+            multi_pending_slot=_pending_timestamp(settings.get("multi_pending_slot")),
+            multi_pending_reset=_pending_timestamp(settings.get("multi_pending_reset")),
+            multi_pending_due=_pending_timestamp(settings.get("multi_pending_due")),
+            multi_pending_runtime=str(settings.get("multi_pending_runtime", ""))[:200],
+            theme_mode=settings.get("theme_mode") if isinstance(settings.get("theme_mode"), str) and settings.get("theme_mode") in {"system", "light", "dark"} else "system",
+            ui_language=settings.get("ui_language") if isinstance(settings.get("ui_language"), str) and settings.get("ui_language") in {"zh_CN", "en"} else "zh_CN",
+        )
+
+    def load_provider_cache(self) -> dict[str, ProviderViewState]:
+        payload = self._read()
+        providers = payload.get("providers") if isinstance(payload, dict) else None
+        if not isinstance(providers, dict):
+            return {}
+        result: dict[str, ProviderViewState] = {}
+        for provider_id, value in providers.items():
+            if not isinstance(provider_id, str) or not isinstance(value, dict):
+                continue
+            try:
+                state = ProviderViewState(**_coerce_provider_fields(value))
+            except (TypeError, ValueError):
+                continue
+            if state.provider_id == provider_id:
+                result[provider_id] = state
+        return result
+
+    def save(
+        self,
+        settings: AppSettings,
+        providers: dict[str, ProviderViewState],
+    ) -> None:
+        payload = {
+            "schema_version": 1,
+            "settings": asdict(settings),
+            "providers": {key: asdict(value) for key, value in providers.items()},
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        os.replace(temporary, self.path)
+
+    def _read(self) -> dict[str, Any]:
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+
+def app_data_root() -> Path:
+    """Return the local state directory, migrating a legacy folder once.
+
+    The folder holds the one-shot provider guards. Abandoning it during a move
+    would silently reset those guards, so a legacy folder is renamed when the
+    new name is still free, and is used in place if the rename cannot happen.
+    """
+    return windows_app_data_root() if is_windows() else posix_app_data_root()
+
+
+def windows_app_data_root() -> Path:
+    root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    return _adopt_legacy_root(
+        root / PRODUCT.app_data_folder, root / PRODUCT.legacy_app_data_folder
+    )
+
+
+def posix_app_data_root() -> Path:
+    """XDG state, not data: durable local evidence a user does not hand-manage.
+
+    Earlier Linux copies fell through to the Windows branch and wrote under the
+    data directory, so that folder is adopted once rather than abandoned.
+    """
+    return _adopt_legacy_root(
+        xdg_state_home() / PRODUCT.app_data_folder.lower(),
+        xdg_data_home() / PRODUCT.app_data_folder,
+    )
+
+
+def _adopt_legacy_root(current: Path, legacy: Path) -> Path:
+    if current.exists() or legacy == current or not legacy.is_dir():
+        return current
+    try:
+        current.parent.mkdir(parents=True, exist_ok=True)
+        legacy.rename(current)
+    except OSError as exc:
+        if exc.errno == errno.EXDEV:
+            return _copy_legacy_root(current, legacy)
+        # Keep using the original guards if adoption is unavailable.
+        return legacy
+    return current
+
+
+def _state_tree_digest(root: Path) -> dict[str, str]:
+    if root.is_symlink():
+        raise OSError("State migration cannot follow symbolic links.")
+    result = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise OSError("State migration cannot follow symbolic links.")
+        key = str(path.relative_to(root))
+        if path.is_dir():
+            result[key] = "directory"
+        elif path.is_file():
+            result[key] = hashlib.sha256(path.read_bytes()).hexdigest()
+        else:
+            raise OSError("State migration requires regular files.")
+    return result
+
+
+def _copy_legacy_root(current: Path, legacy: Path) -> Path:
+    """Publish a complete copy on the target filesystem, retaining the source.
+
+    A failed or interrupted copy must never leave a partial authoritative state
+    directory. The desktop holds its instance lock before resolving state paths.
+    """
+    try:
+        before = _state_tree_digest(legacy)
+        with tempfile.TemporaryDirectory(
+            prefix=f".{current.name}-migration-", dir=current.parent
+        ) as directory:
+            staged = Path(directory) / "state"
+            shutil.copytree(legacy, staged, symlinks=True)
+            if before != _state_tree_digest(staged) or before != _state_tree_digest(legacy):
+                raise OSError("State changed during migration.")
+            for path in staged.rglob("*"):
+                if path.is_file():
+                    with path.open("rb") as stream:
+                        os.fsync(stream.fileno())
+            # Do not merge into or replace a destination created in the meantime.
+            if current.exists():
+                return current
+            staged.rename(current)
+    except OSError:
+        return legacy
+    # Leave the old folder intact as a backup. Future starts select current.
+    return current
+
+
+def default_app_state_path() -> Path:
+    return app_data_root() / "app-state.json"
+
+
+def _pending_timestamp(value):
+    return float(value) if _is_finite_number(value) and value >= 0 else None
