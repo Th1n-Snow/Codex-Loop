@@ -51,7 +51,7 @@ class SupersededGuardRegressionTests(unittest.TestCase):
     def test_current_verified_window_is_not_hidden_by_old_failed_attempt(self):
         p=operational_presentation(self.settings(),self.state(),now=1100)
         self.assertEqual('active_window',p.kind)
-        self.assertIn('Next start',p.next_action)
+        self.assertIn('下次定时检查',p.next_action)
 
     def test_unanchored_request_remains_guarded(self):
         state=replace(self.state(),status='Guarded',quota_state='UNANCHORED',outcome_category='GUARDED')
@@ -68,4 +68,4 @@ class SupersededGuardRegressionTests(unittest.TestCase):
         self.assertIsNone(result.state.outcome_category)
         self.assertEqual(20000,result.state.reset_at)
         self.assertEqual('WAIT',automation_decision(True,result.state,now=1300,compatible_runtime_identity='r',checked_runtime_identity='r').action)
-        self.assertEqual('ROLLOVER',automation_decision(True,result.state,now=20061,compatible_runtime_identity='r',checked_runtime_identity='r').action)
+        self.assertEqual('WAIT',automation_decision(True,result.state,now=20061,compatible_runtime_identity='r',checked_runtime_identity='r').action)

@@ -164,7 +164,7 @@ class ApplicationControllerTests(unittest.TestCase):
                 saved = controller.set_schedule_mode("daily")
 
             self.assertFalse(saved)
-            self.assertEqual("continuous", controller.settings.schedule_mode)
+            self.assertEqual("multi", controller.settings.schedule_mode)
             self.assertEqual("state_write_failed", controller.persistence_error)
 
     def test_temporary_write_failure_reverts_daily_time(self):
@@ -221,7 +221,7 @@ class ApplicationControllerTests(unittest.TestCase):
 
             changed = WEEKLY_TIMES
             self.assertTrue(controller.set_weekly_start_times(changed))
-            self.assertTrue(controller.set_schedule_mode("continuous"))
+            self.assertTrue(controller.set_schedule_mode("multi"))
             self.assertTrue(controller.set_daily_start_time(8, 30))
             self.assertTrue(controller.set_schedule_mode("weekly"))
 
@@ -252,7 +252,7 @@ class ApplicationControllerTests(unittest.TestCase):
                 saved = controller.set_schedule_mode("weekly")
 
             self.assertFalse(saved)
-            self.assertEqual("continuous", controller.settings.schedule_mode)
+            self.assertEqual("multi", controller.settings.schedule_mode)
             self.assertIsNone(controller.settings.weekly_start_times)
 
     def test_invalid_weekly_values_are_rejected_without_changing_saved_values(self):
@@ -535,7 +535,7 @@ class ApplicationControllerTests(unittest.TestCase):
             self.assertEqual("Waiting", controller.states["codex"].status)
             self.assertEqual("EXHAUSTED", controller.states["codex"].quota_state)
             self.assertEqual("WAIT", controller.decisions(now=1_059)["codex"].action)
-            self.assertEqual("ROLLOVER", controller.decisions(now=1_060)["codex"].action)
+            self.assertEqual("WAIT", controller.decisions(now=1_060)["codex"].action)
 
     def test_equal_timestamp_recoverable_detection_unstrands_released_cache(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -580,7 +580,7 @@ class ApplicationControllerTests(unittest.TestCase):
             controller.start()
 
             self.assertEqual("Waiting", controller.states["codex"].status)
-            self.assertEqual("ROLLOVER", controller.decisions(now=1_060)["codex"].action)
+            self.assertEqual("WAIT", controller.decisions(now=1_060)["codex"].action)
 
 
 if __name__ == "__main__":

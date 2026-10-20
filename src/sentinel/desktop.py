@@ -982,8 +982,6 @@ class MainWindow(QMainWindow):
             elif decision.action == "TIMED":
                 # Multi-time appointments are admitted and drained by the backend queue.
                 continue
-            elif decision.action == "ROLLOVER":
-                self._start_operation(provider_id, "rollover")
 
     def _can_start_loop(self, provider_id: str, *, now: float) -> bool:
         state = self.controller.states.get(provider_id)

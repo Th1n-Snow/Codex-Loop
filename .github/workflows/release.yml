@@ -25,14 +25,16 @@ jobs:
       - name: Build executable, Setup and licensed source packages
         shell: pwsh
         run: ./scripts/build-release-ci.ps1
-      - name: Publish v1.0.0 once
+      - name: Publish the current version once
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view v1.0.0 --repo "$env:GITHUB_REPOSITORY" 2>$null
-          if ($LASTEXITCODE -eq 0) { throw 'v1.0.0 already exists; increment the version before publishing new binaries.' }
-          gh release create v1.0.0 --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title "Codex Loop v1.0.0" --notes-file docs/RELEASE_NOTES_v1.0.0.md dist/CodexLoop-Setup.exe dist/CodexLoop-Setup.exe.sha256 dist/CodexLoop-1.0.0-windows-x64.zip dist/CodexLoop-1.0.0-source.zip dist/CodexLoop-1.0.0-dependency-sources.zip dist/SHA256SUMS.txt
+          $version = python -c "from sentinel.product import PRODUCT; print(PRODUCT.version)"
+          $tag = "v$version"
+          gh release view $tag --repo "$env:GITHUB_REPOSITORY" 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "$tag already exists; increment the version before publishing new binaries." }
+          gh release create $tag --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title "Codex Loop $tag" --notes-file "docs/RELEASE_NOTES_$tag.md" dist/CodexLoop-Setup.exe dist/CodexLoop-Setup.exe.sha256 "dist/CodexLoop-$version-windows-x64.zip" "dist/CodexLoop-$version-source.zip" "dist/CodexLoop-$version-dependency-sources.zip" dist/SHA256SUMS.txt
           if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed' }
       - uses: actions/upload-artifact@v4
         if: always()

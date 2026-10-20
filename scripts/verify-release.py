@@ -2,7 +2,7 @@
 from pathlib import Path
 import subprocess,sys,os,json,re
 ROOT=Path(__file__).resolve().parents[1]
-MODULES='app_controller app_state auto_usage_sync branding chain classifier cli codex_loop_extension diagnostics display_preferences history local_multi_schedule local_save_feedback local_self_test local_warmup_recovery provider_runtime providers protocol quota reliability schedule startup single_instance state_resilience trigger updates'.split()
+MODULES='app_controller app_state auto_usage_sync branding chain classifier cli codex_loop_extension diagnostics display_preferences history local_multi_schedule local_save_feedback local_self_test local_warmup_recovery provider_runtime providers protocol quota reliability schedule scheduled_only startup single_instance state_resilience trigger updates'.split()
 def main():
  out=ROOT/'artifacts'/'release-checks';out.mkdir(parents=True,exist_ok=True)
  env=dict(os.environ,QT_QPA_PLATFORM='offscreen',PYTHONUTF8='1')

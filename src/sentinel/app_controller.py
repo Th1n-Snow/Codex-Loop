@@ -223,7 +223,7 @@ class ApplicationController:
         )
 
     def set_schedule_mode(self, mode: str) -> bool:
-        if mode not in SCHEDULE_MODES:
+        if mode == "continuous" or mode not in SCHEDULE_MODES:
             raise ValueError(f"unsupported schedule mode: {mode}")
         weekly_times = self.settings.weekly_start_times
         if mode == WEEKLY and weekly_times is None:

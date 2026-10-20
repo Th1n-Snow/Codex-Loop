@@ -209,12 +209,12 @@ class RecoveryTests(unittest.TestCase):
         state = controller.states["codex"]
         self.assertEqual(940, state.reset_at)
         self.assertEqual(19040, self.history.load_recent(now=1040)[-1].windows[0].resets_at)
-        self.assertEqual("ROLLOVER", controller.decisions(now=1040)["codex"].action)
-        self.assertEqual("due", operational_presentation(controller.settings, state, now=1040).kind)
+        self.assertEqual("WAIT", controller.decisions(now=1040)["codex"].action)
+        self.assertEqual("waiting", operational_presentation(controller.settings, state, now=1040).kind)
         controller = ApplicationController([provider], self.store, error_history=self.history)
         controller.start()
         self.assertEqual(940, controller.states["codex"].reset_at)
-        self.assertEqual("ROLLOVER", controller.decisions(now=1040)["codex"].action)
+        self.assertEqual("WAIT", controller.decisions(now=1040)["codex"].action)
         day = datetime(2026, 9, 23, 11, 0).timestamp()
         controller.update_provider_state(replace(
             controller.states["codex"],
@@ -267,7 +267,7 @@ class PresentationTests(unittest.TestCase):
         )
         continuous = self.settings(schedule_mode="continuous")
         self.assertEqual(
-            "Next start around today at 3:01 PM, after this window resets",
+            "Next start waits for this window to reset and a usable schedule",
             operational_presentation(continuous, active, now=now).next_action,
         )
         unavailable = self.settings(schedule_mode="weekly", weekly_start_times=None)
@@ -420,6 +420,9 @@ class LateProbeTests(unittest.TestCase):
 
     def test_technical_details_show_blocked_and_recovered_incident_after_restart(self):
         now = time.time()
+        local = datetime.fromtimestamp(now)
+        self.controller.settings = replace(self.controller.settings, schedule_mode='multi',
+                                           multi_start_times=((local.hour,local.minute),))
         state = replace(self.controller.states["codex"], reset_at=int(now - 100),
                         last_verified_at=now - 200, weekly_used_percent=10,
                         weekly_reset_at=int(now + 80_000))

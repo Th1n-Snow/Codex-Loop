@@ -63,7 +63,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertTrue(summary.due)
         self.assertEqual(due, summary.next_action_at)
 
-    def test_continuous_is_not_due_until_the_full_safety_minute(self):
+    def test_retired_continuous_is_never_due_even_after_the_safety_minute(self):
         boundary = timestamp(2026, 8, 31, 3, 32)
         at_reset = schedule_summary(
             "continuous", boundary_reset_at=boundary, now=boundary
@@ -76,8 +76,8 @@ class ScheduleTests(unittest.TestCase):
         )
         self.assertFalse(at_reset.due)
         self.assertFalse(at_59.due)
-        self.assertTrue(at_60.due)
-        self.assertEqual(boundary + 60, at_60.next_action_at)
+        self.assertFalse(at_60.due)
+        self.assertIsNone(at_60.next_action_at)
 
     def test_dst_spring_gap_normalizes_to_first_real_local_time(self):
         boundary = timestamp(2027, 3, 14, 0, 30)

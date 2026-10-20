@@ -79,7 +79,7 @@ class CorruptProviderCacheTests(unittest.TestCase):
         # Both of these raised TypeError before the fields were normalized.
         self.assertEqual("Not verified yet", format_countdown(state.reset_at, 1_788_000_000.0))
         self.assertEqual(
-            "BOOTSTRAP", automation_decision(True, state, now=1_788_000_000.0).action
+            "WAIT", automation_decision(True, state, now=1_788_000_000.0).action
         )
 
     def test_non_finite_numbers_are_rejected(self) -> None:

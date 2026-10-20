@@ -36,7 +36,7 @@ class AppSettings:
     first_run_complete: bool = False
     compatible_runtime_identities: dict[str, str] | None = None
     checked_runtime_identities: dict[str, str] | None = None
-    schedule_mode: str = CONTINUOUS
+    schedule_mode: str = MULTI
     daily_start_hour: int = 4
     daily_start_minute: int = 0
     weekly_start_times: tuple[tuple[int, int], ...] | None = None
@@ -170,7 +170,7 @@ def automation_decision(
     now: float,
     compatible_runtime_identity: str | None = None,
     checked_runtime_identity: str | None = None,
-    schedule_mode: str = CONTINUOUS,
+    schedule_mode: str = MULTI,
     daily_hour: int = 4,
     daily_minute: int = 0,
     weekly_times: tuple[tuple[int, int], ...] | None = None,
@@ -201,6 +201,8 @@ def automation_decision(
         if state.runtime_identity == checked_runtime_identity:
             return AutomationDecision("NONE", "Provider compatibility needs attention.")
         return AutomationDecision("PROBE", "Provider runtime capabilities must be checked.")
+    if schedule_mode == CONTINUOUS:
+        return AutomationDecision("WAIT", "Automatic reset chaining has been removed.")
     if schedule_mode == MULTI:
         summary = schedule_summary(MULTI, boundary_reset_at=state.reset_at,
                                    now=now, multi_times=multi_times,
@@ -242,7 +244,7 @@ def automation_decision(
             return AutomationDecision(
                 "ROLLOVER", "The daytime reset boundary has passed."
             )
-        return AutomationDecision("ROLLOVER", "The verified reset boundary has passed.")
+        return AutomationDecision("WAIT", "Automatic reset chaining has been removed.")
     if schedule_mode == DAILY and now >= state.reset_at + RESET_BUFFER_SECONDS:
         return AutomationDecision("WAIT", "Waiting for the selected daily start time.")
     if schedule_mode == WEEKLY and schedule.phase == "overnight_pause":
@@ -366,8 +368,9 @@ class AppStateStore:
             else {}
         )
         schedule_mode = settings.get("schedule_mode")
-        if schedule_mode not in SCHEDULE_MODES:
-            schedule_mode = CONTINUOUS
+        retired_schedule = schedule_mode == CONTINUOUS or schedule_mode not in SCHEDULE_MODES
+        if retired_schedule:
+            schedule_mode = MULTI
         daily_hour = settings.get("daily_start_hour")
         daily_minute = settings.get("daily_start_minute")
         if not is_valid_daily_start_time(daily_hour, daily_minute):
@@ -399,7 +402,7 @@ class AppStateStore:
                 invalid_pause = True
                 paused_until = None
         return AppSettings(
-            automation_enabled=settings.get("automation_enabled") is True and not invalid_pause,
+            automation_enabled=settings.get("automation_enabled") is True and not invalid_pause and not retired_schedule,
             start_with_windows=settings.get("start_with_windows") is True,
             first_run_complete=settings.get("first_run_complete") is True,
             compatible_runtime_identities=safe_identities,
@@ -412,10 +415,10 @@ class AppStateStore:
             multi_start_times=multi_times,
             multi_last_slot=multi_last_slot,
             multi_last_status=multi_status[:200],
-            multi_pending_slot=_pending_timestamp(settings.get("multi_pending_slot")),
-            multi_pending_reset=_pending_timestamp(settings.get("multi_pending_reset")),
-            multi_pending_due=_pending_timestamp(settings.get("multi_pending_due")),
-            multi_pending_runtime=str(settings.get("multi_pending_runtime", ""))[:200],
+            multi_pending_slot=None if retired_schedule else _pending_timestamp(settings.get("multi_pending_slot")),
+            multi_pending_reset=None if retired_schedule else _pending_timestamp(settings.get("multi_pending_reset")),
+            multi_pending_due=None if retired_schedule else _pending_timestamp(settings.get("multi_pending_due")),
+            multi_pending_runtime="" if retired_schedule else str(settings.get("multi_pending_runtime", ""))[:200],
             theme_mode=settings.get("theme_mode") if isinstance(settings.get("theme_mode"), str) and settings.get("theme_mode") in {"system", "light", "dark"} else "system",
             ui_language=settings.get("ui_language") if isinstance(settings.get("ui_language"), str) and settings.get("ui_language") in {"zh_CN", "en"} else "zh_CN",
         )

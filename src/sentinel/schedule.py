@@ -214,10 +214,8 @@ def schedule_summary(
         return ScheduleSummary(mode, None, False)
 
     if mode == CONTINUOUS:
-        next_action_at = float(boundary_reset_at) + RESET_BUFFER_SECONDS
-        return ScheduleSummary(
-            mode, next_action_at, now >= next_action_at, "continuous_rollover"
-        )
+        # Retained only to read old callers safely; no automatic reset chaining.
+        return ScheduleSummary(mode, None, False, "removed")
     if mode == DAILY:
         next_action_at = next_daily_start_after(
             boundary_reset_at,
@@ -260,8 +258,16 @@ def multi_schedule_summary(now: float, values: Sequence[tuple[int, int]],
         return ScheduleSummary(MULTI, None, False, "empty")
     day = datetime.fromtimestamp(now, timezone).date()
     # Include yesterday so a 23:59 appointment can finish admission after midnight.
-    slots = sorted({_local_candidate(day + timedelta(days=offset), h, m, timezone)
-                    for offset in (-1, 0, 1, 2) for h, m in times})
+    slots = set()
+    for offset in (-1, 0, 1, 2):
+        for hour, minute in times:
+            try:
+                slots.add(_local_candidate(day + timedelta(days=offset), hour, minute, timezone))
+            except (OSError, OverflowError, ValueError):
+                # Windows cannot represent some dates around the Unix epoch.
+                # Unrepresentable appointments must never become immediate work.
+                continue
+    slots = sorted(slots)
     unhandled = [slot for slot in slots if last_slot is None or slot > last_slot]
     due = [slot for slot in unhandled if slot <= now < slot + MULTI_GRACE_SECONDS]
     if due:
