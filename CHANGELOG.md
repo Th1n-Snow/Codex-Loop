@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2 — 2026-10-21
+
+- Remove the Windows main-window caption icon while keeping the in-app brand mark, taskbar/tray icons and normal window controls.
+
 ## 1.1.1 — 2026-10-21
 
 - Translate blocked/inconclusive provider checks and related error states in Chinese, including combined tray and tooltip messages.

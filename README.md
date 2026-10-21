@@ -2,6 +2,10 @@
 
 本地运行的 Codex 额度窗口预热与查看工具。当前发布目标：**Windows 11 x64**，界面支持简体中文与 English。
 
+## v1.1.2 界面调整
+
+移除 Windows 主窗口标题栏最左上角的小图标，保留页面环形标记、任务栏与托盘图标。
+
 ## v1.1.1 修复
 
 补齐异常状态的中文提示；桃夭主题左侧警告条使用主题粉色，“需要处理”标签和安全保护继续生效。
@@ -29,7 +33,7 @@
 
 推荐在 [本仓库 Releases](https://github.com/Th1n-Snow/Codex-Loop/releases) 下载 `CodexLoop-Setup.exe`，双击后选择安装语言、接受许可证、选择安装目录，安装完成会自动创建桌面和开始菜单快捷方式。无需管理员权限，受保护目录可能不可写，请选择自己的 D/E 盘 Apps 文件夹。
 
-也可以获取 `CodexLoop-1.1.1-windows-x64.zip`，解压整个文件夹后运行 `CodexLoop.exe`。可解压到 D 盘或 E 盘。
+也可以获取 `CodexLoop-1.1.2-windows-x64.zip`，解压整个文件夹后运行 `CodexLoop.exe`。可解压到 D 盘或 E 盘。
 
 **不能只复制 exe**，必须保留旁边的 `_internal`、许可证与其他文件。运行发布包无需另装 Python。
 

@@ -60,6 +60,22 @@ class AppearanceManager(QObject):
             set_attribute.argtypes=[wintypes.HWND,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD]
             set_attribute.restype=ctypes.c_long
             handle=int(self.window.winId())
+            # Hide only the caption icon. Keep the QIcon for the taskbar/tray
+            # and keep the normal system menu and window controls available.
+            user32=ctypes.windll.user32
+            get_style=getattr(user32,'GetWindowLongPtrW',user32.GetWindowLongW)
+            set_style=getattr(user32,'SetWindowLongPtrW',user32.SetWindowLongW)
+            get_style.argtypes=[wintypes.HWND,ctypes.c_int]
+            get_style.restype=ctypes.c_ssize_t
+            set_style.argtypes=[wintypes.HWND,ctypes.c_int,ctypes.c_ssize_t]
+            set_style.restype=ctypes.c_ssize_t
+            extended_style=get_style(handle,-20)
+            if not extended_style & 0x00000001:  # WS_EX_DLGMODALFRAME
+                set_style(handle,-20,extended_style | 0x00000001)
+                refresh=user32.SetWindowPos
+                refresh.argtypes=[wintypes.HWND,wintypes.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.UINT]
+                refresh.restype=wintypes.BOOL
+                refresh(handle,None,0,0,0,0,0x0037)  # frame changed, no move/size/activation
             light=system_is_light() if self.mode=='system' else self.mode=='light'
             def set_value(attribute,value):
                 data=wintypes.DWORD(value)
