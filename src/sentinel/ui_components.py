@@ -292,10 +292,10 @@ class ProviderCard(QFrame):
     def __init__(self, state: ProviderViewState, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("providerCard")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setMinimumHeight(280)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setMinimumHeight(245)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 21, 24, 21)
+        layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(8)
 
         header = QHBoxLayout()
@@ -321,34 +321,38 @@ class ProviderCard(QFrame):
         self.update_button.setVisible(False)
         layout.addWidget(self.update_button, 0, Qt.AlignmentFlag.AlignLeft)
 
-        rule = QFrame()
-        rule.setObjectName("cardRule")
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setFixedHeight(1)
-        layout.addSpacing(3)
-        layout.addWidget(rule)
         self.metadata_label = QLabel()
-        self.metadata_label.setProperty("muted", True)
-        layout.addWidget(self.metadata_label)
+        self.metadata_label.hide()
         self.usage_label = QLabel()
         self.usage_label.setObjectName("metricLabel")
         layout.addWidget(self.usage_label)
         self.usage_bar = _metric_bar("usageBar")
-        layout.addWidget(self.usage_bar)
+        usage_row = QHBoxLayout()
+        usage_row.addWidget(self.usage_bar, 1)
+        self.usage_percent = QLabel()
+        self.usage_percent.setObjectName("secondaryMetric")
+        usage_row.addWidget(self.usage_percent)
+        layout.addLayout(usage_row)
         layout.addSpacing(2)
-        sync_row = QHBoxLayout()
+        actions_row = QHBoxLayout()
+        actions_row.setSpacing(12)
         self.sync_button = QPushButton("Sync usage")
         self.sync_button.setObjectName("secondaryButton")
+        self.sync_button.setProperty("dashboardGlyph", "sync")
         self.sync_button.setToolTip("Usage refreshes automatically: about every minute on the dashboard and every five minutes in the background. Warm-ups take priority. Click to sync now.")
         self.sync_status = QLabel("")
         self.sync_status.setProperty("muted", True)
-        sync_row.addWidget(self.sync_button, 0)
-        sync_row.addWidget(self.sync_status, 1)
-        layout.addLayout(sync_row)
+        self.sync_status.setWordWrap(True)
+        self.sync_status.setVisible(False)
         self.verify_button = QPushButton("预热自检")
         self.verify_button.setObjectName("secondaryButton")
+        self.verify_button.setProperty("dashboardGlyph", "play")
         self.verify_button.setToolTip("发送一次极小请求验证实际预热链路，消耗少量额度；使用临时会话，不保存测试聊天。")
-        layout.addWidget(self.verify_button, 0, Qt.AlignmentFlag.AlignLeft)
+        for button in (self.sync_button, self.verify_button):
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            actions_row.addWidget(button, 1)
+        layout.addLayout(actions_row)
+        layout.addWidget(self.sync_status)
         self.verification_label = QLabel("会消耗少量额度，约需 1–5 分钟；临时会话不保存。")
         self.verification_label.setObjectName("windowVerificationResult")
         self.verification_label.setProperty("muted", True)
@@ -385,7 +389,16 @@ class ProviderCard(QFrame):
             state.detail == LIGHTWEIGHT_MODEL_UNAVAILABLE_DETAIL
         )
         self.metadata_label.setText(presented.verified)
-        self.usage_label.setText(presented.usage)
+        self.detail_label.setVisible(presented.tone not in {"success"})
+        self.countdown_label.setToolTip(presented.detail)
+        self.sync_button.setToolTip(presented.verified + "\n" + "Usage refreshes automatically: about every minute on the dashboard and every five minutes in the background. Warm-ups take priority. Click to sync now.")
+        if state.used_percent is not None:
+            remaining=max(0.0,min(100.0,100.0-state.used_percent))
+            self.usage_label.setText(f"剩余 {remaining:g}% · 已用 {state.used_percent:g}%")
+            self.usage_percent.setText(f"{remaining:g}%")
+        else:
+            self.usage_label.setText(presented.usage)
+            self.usage_percent.setText("—")
         self.usage_bar.setValue(round(max(0.0, min(100.0, 100.0 - state.used_percent))) if state.used_percent is not None else 0)
         self.usage_bar.setAccessibleName("5 小时剩余额度")
         self.fit_wrapped_text()
@@ -395,7 +408,7 @@ class ProviderCard(QFrame):
         # A fixed vertical card policy otherwise keeps the old single-line hint.
         margins = self.layout().contentsMargins()
         width = max(1, self.contentsRect().width() - margins.left() - margins.right())
-        for label in (self.detail_label, self.verification_label):
+        for label in (self.detail_label, self.sync_status, self.verification_label):
             label.setMinimumHeight(max(0, label.heightForWidth(width)))
         self.updateGeometry()
 
@@ -429,7 +442,9 @@ class ProviderCard(QFrame):
             "unavailable": "Codex not available",
         }
         self.sync_status.setText(messages[state])
+        self.sync_status.setVisible(bool(messages[state]))
         self.sync_button.setEnabled(state != "syncing")
+        self.fit_wrapped_text()
 
 
 class ScheduleCard(QFrame):
@@ -438,10 +453,10 @@ class ScheduleCard(QFrame):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("scheduleCard")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setMinimumHeight(280)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setMinimumHeight(245)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 21, 24, 21)
+        layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(9)
 
         header = QHBoxLayout()
@@ -464,30 +479,19 @@ class ScheduleCard(QFrame):
         layout.addWidget(self.detail_label)
         layout.addStretch(1)
 
-        next_title = QLabel("NEXT ACTION")
-        next_title.setObjectName("eyebrow")
-        layout.addWidget(next_title)
         self.next_label = QLabel()
-        self.next_label.setObjectName("scheduleNext")
+        self.next_label.setObjectName("detail")
         self.next_label.setWordWrap(True)
         layout.addWidget(self.next_label)
-        self.pause_button = QPushButton("Pause until tomorrow")
-        self.pause_button.setObjectName("secondaryButton")
-        layout.addWidget(self.pause_button, 0, Qt.AlignmentFlag.AlignLeft)
-        self.manage_button = QPushButton("Manage schedule")
-        self.manage_button.setObjectName("secondaryButton")
-        actions = QHBoxLayout()
-        actions.addWidget(self.manage_button)
         self.history_button = QPushButton("Recent starts")
         self.history_button.setObjectName("secondaryButton")
+        self.history_button.setProperty("dashboardGlyph", "history")
         self.history_button.setToolTip("See which window starts were confirmed, not sent, or left uncertain.")
-        actions.addWidget(self.history_button)
-        actions.addStretch()
-        layout.addLayout(actions)
+        layout.addWidget(self.history_button)
         self.last_action_label = QLabel()
         self.last_action_label.setObjectName("lastAction")
         self.last_action_label.setWordWrap(True)
-        layout.addWidget(self.last_action_label)
+        self.last_action_label.hide()
 
     def fit_wrapped_text(self) -> None:
         margins = self.layout().contentsMargins()
@@ -510,8 +514,7 @@ class ScheduleCard(QFrame):
         enabled = settings.automation_enabled
         if settings.schedule_mode == "multi":
             self.mode_label.setText("每天多个时间")
-            self.detail_label.setText("每天 " + "、".join(f"{h:02d}:{m:02d}" for h,m in settings.multi_start_times)
-                + " 检查预热；窗口仍有效时跳过。")
+            self.detail_label.setText("Checks warm-up at your scheduled times")
         elif settings.schedule_mode == DAILY:
             time_text = datetime(2000, 1, 1, settings.daily_start_hour, settings.daily_start_minute).strftime(
                 "%I:%M %p"
@@ -532,7 +535,7 @@ class ScheduleCard(QFrame):
             )
 
         if next_action is not None:
-            self.next_label.setText(next_action)
+            self.next_label.setText("Checks your quota window at the scheduled times and warms up when needed." if enabled and next_action.startswith("下次定时检查：") and not settings.pause_active(now) else next_action)
             return
         if not enabled:
             self.next_label.setText("No automatic requests while automation is off")
@@ -766,7 +769,7 @@ def _metric_bar(name: str) -> QProgressBar:
     bar.setObjectName(name)
     bar.setRange(0, 100)
     bar.setTextVisible(False)
-    bar.setFixedHeight(6)
+    bar.setFixedHeight(14)
     return bar
 
 

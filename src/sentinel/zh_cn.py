@@ -273,6 +273,16 @@ FRAGMENTS = {
 }
 
 
+EXACT.update({
+    'Checks warm-up at your scheduled times each day': '每天按设定时间执行预热检查',
+    'Checks warm-up at your scheduled times': '按设定时间执行预热检查',
+    'Follows your saved warm-up times': '按已保存的时间检查预热',
+    'Theme color': '主题色',
+    'Classic mint': '经典薄荷',
+    'Peach blossom': '桃夭',
+    'Checks your quota window at the scheduled times and warms up when needed.': '到点后检查额度窗口，必要时发起预热。',
+})
+
 def _translate_zh(text):
     if not isinstance(text,str):
         return text
@@ -308,6 +318,7 @@ EXACT[
     '启动额度窗口会消耗少量套餐额度。结果不明确的请求不会自动重试。'
 )
 FRAGMENTS["Recent starts"] = "最近预热记录"
+FRAGMENTS["Usage refreshes automatically: about every minute on the dashboard and every five minutes in the background. Warm-ups take priority. Click to sync now."] = "额度会自动同步：仪表盘约每分钟一次，后台约每五分钟一次；预热任务优先。点击可立即同步。"
 _language = "zh_CN"
 _installed = False
 _retranslating = False

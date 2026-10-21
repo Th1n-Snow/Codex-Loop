@@ -46,7 +46,7 @@ class PauseTests(unittest.TestCase):
         self.provider.history = SafeHistory(Path(self.tmp.name) / "sentinel.jsonl")
         self.store = AppStateStore(Path(self.tmp.name) / "app-state.json")
         self.settings = AppSettings(
-            automation_enabled=True, schedule_mode="weekly", weekly_start_times=WEEK,
+            automation_enabled=True, schedule_mode="weekly", weekly_start_times=WEEK, ui_language="en",
             compatible_runtime_identities={"codex": "runtime:1"},
         )
         self.store.save(self.settings, {})
@@ -115,7 +115,9 @@ class PauseTests(unittest.TestCase):
         self.controller.set_weekly_start_times(((9, 30),) * 7)
         self.controller.set_schedule_mode("daily")
         self.controller.set_daily_start_time(11, 45)
-        self.controller.set_schedule_mode("continuous")
+        with self.assertRaises(ValueError):
+            self.controller.set_schedule_mode("continuous")
+        self.controller.settings=replace(self.controller.settings,schedule_mode="continuous")
         self.assertEqual(target, self.store.load().automation_paused_until)
         self.assertFalse(self.controller.pause_until_tomorrow(now=self.now))
         self.assertEqual("WAIT", self.controller.decisions(now=self.now)["codex"].action)
@@ -134,7 +136,9 @@ class PauseTests(unittest.TestCase):
                 self.assertEqual(datetime(*expected, tzinfo=ZONE, fold=0).timestamp(), target)
 
     def test_daily_supported_continuous_and_off_unavailable(self):
-        self.controller.set_schedule_mode("continuous")
+        with self.assertRaises(ValueError):
+            self.controller.set_schedule_mode("continuous")
+        self.controller.settings=replace(self.controller.settings,schedule_mode="continuous")
         self.assertFalse(self.controller.pause_until_tomorrow(now=self.now))
         self.controller.set_schedule_mode("daily")
         self.assertTrue(self.controller.pause_until_tomorrow(now=self.now))
@@ -148,7 +152,8 @@ class PauseTests(unittest.TestCase):
                 self.store.path.write_text(json.dumps({"settings": {"automation_enabled": True, "automation_paused_until": invalid}}))
                 self.assertFalse(self.store.load().automation_enabled)
         self.store.path.write_text('{"settings":{"automation_enabled":true}}')
-        self.assertTrue(self.store.load().automation_enabled)
+        self.assertFalse(self.store.load().automation_enabled)
+        self.assertEqual("multi",self.store.load().schedule_mode)
         self.assertIsNone(self.store.load().automation_paused_until)
 
     def test_failed_pause_and_failed_resume_roll_back_and_block_decisions(self):
@@ -186,7 +191,9 @@ class PauseTests(unittest.TestCase):
         self.assertEqual([], window.thread_pool.workers)
         shell.refresh_menu(now=self.now)
         self.assertIn(display, shell.pause_action.text())
-        self.controller.set_schedule_mode("continuous")
+        with self.assertRaises(ValueError):
+            self.controller.set_schedule_mode("continuous")
+        self.controller.settings=replace(self.controller.settings,schedule_mode="continuous")
         window.refresh_clock(now=self.now)
         shell.refresh_menu(now=self.now)
         self.assertFalse(shell.pause_action.isVisible())
@@ -197,7 +204,10 @@ class PauseTests(unittest.TestCase):
         window.toggle_temporary_pause(now=self.now)
         window.refresh_clock(now=self.now)
         self.assertIsNone(self.store.load().automation_paused_until)
-        self.assertFalse(window.schedule_card.pause_button.isEnabled())
+        shell=DesktopShell(window)
+        self.addCleanup(shell.tray.hide)
+        shell.refresh_menu(now=self.now)
+        self.assertFalse(shell.pause_action.isEnabled())
 
     def test_pause_controls_fit_minimum_window_and_have_accessible_names(self):
         window = self.window()
@@ -208,9 +218,10 @@ class PauseTests(unittest.TestCase):
                 self.controller.pause_until_tomorrow(now=self.now)
             window.refresh_clock(now=self.now)
             self.app.processEvents()
-            button = window.schedule_card.pause_button
+            self.assertFalse(hasattr(window.schedule_card,"pause_button"))
+            button = window.schedule_card.history_button
             self.assertLessEqual(button.geometry().right(), window.schedule_card.width() - 20)
-            self.assertEqual("Resume automation" if paused else "Pause until tomorrow", button.text())
+            self.assertEqual("Recent starts", button.text())
             self.assertEqual(button.text(), QAccessible.queryAccessibleInterface(button).text(QAccessible.Text.Name))
             self.assertTrue(button.isEnabled())
             for label in (window.schedule_card.detail_label, window.schedule_card.next_label):

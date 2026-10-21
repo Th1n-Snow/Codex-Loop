@@ -23,6 +23,15 @@ class ThemeTokens:
     accent_deep: str = "#10B981"
     accent_hover: str = "#22D3A1"
     accent_ink: str = "#04150E"
+    progress_fill: str | None = None
+    progress_track: str | None = None
+    secondary_ink: str | None = None
+    secondary_surface: str | None = None
+    header_surface: str | None = None
+    banner_surface: str | None = None
+    nav_surface: str | None = None
+    secondary_border: str | None = None
+    badge_surface: str | None = None
     info: str = "#74C4FF"
     warning: str = "#F1D38A"
     error: str = "#FFB4AE"
@@ -47,10 +56,35 @@ LIGHT_TOKENS = ThemeTokens(
     accent_hover="#066A59", accent_ink="#FFFFFF", info="#2563A6", warning="#956009", error="#B83232")
 TOKENS = ThemeTokens()
 
+PEACH_LIGHT_TOKENS = ThemeTokens(
+    background="#FEF5F9", background_deep="#FBE4EA", surface="#FEF9FC",
+    surface_sunken="#FDF0F5", surface_raised="#FDF0F5", surface_hover="#FBE3EC",
+    border="#F4CFDE", border_strong="#EFC3D3", text="#321B2D", text_soft="#594152",
+    text_muted="#79616F", text_faint="#927585", accent="#B72159", accent_deep="#B84C6F",
+    accent_hover="#A93F64", accent_ink="#FFFFFF", progress_fill="#CD6588",
+    progress_track="#FCD9E1", secondary_ink="#B72159", secondary_surface="#FEF9FC",
+    header_surface="#FEF5F9", banner_surface="#FCE8EE", nav_surface="#FADAE3",
+    secondary_border="#DF7899", badge_surface="#FCE3EC",
+    info="#85506D", warning="#956009", error="#B83248")
+PEACH_DARK_TOKENS = ThemeTokens(
+    background="#17181C", background_deep="#17181C", surface="#202126",
+    surface_sunken="#292A30", surface_raised="#292A30", surface_hover="#33343B",
+    border="#383940", border_strong="#505159", text="#EFECEF", text_soft="#D1CDD2",
+    text_muted="#ADA6AE", text_faint="#8E8790", accent="#D38AA1", accent_deep="#9F526E",
+    accent_hover="#B36782", accent_ink="#241A20", progress_fill="#C989A0",
+    progress_track="#353039", secondary_ink="#EFECEF", secondary_surface="#202126",
+    header_surface="#17181C", banner_surface="#202126", nav_surface="#49333E",
+    secondary_border="#737079", badge_surface="#3B2D35",
+    info="#B7BCCF", warning="#E8C185", error="#FF9FAE")
 
-def select_theme(light: bool) -> None:
+
+
+def select_theme(light: bool, color_theme: str = "classic") -> None:
     from dataclasses import fields
-    chosen = LIGHT_TOKENS if light else DARK_TOKENS
+    if color_theme == "peach":
+        chosen = PEACH_LIGHT_TOKENS if light else PEACH_DARK_TOKENS
+    else:
+        chosen = LIGHT_TOKENS if light else DARK_TOKENS
     for field in fields(TOKENS):
         setattr(TOKENS, field.name, getattr(chosen, field.name))
 
@@ -87,8 +121,8 @@ def desktop_stylesheet(tokens: ThemeTokens = TOKENS) -> str:
     }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
     QFrame#appHeader {{
-        background: {tokens.background_deep};
-        border-bottom: 1px solid {tokens.border};
+        background: {tokens.header_surface or tokens.background_deep};
+        border-bottom: 1px solid {tokens.header_surface or tokens.border};
     }}
     QLabel#brandMark {{
         background: {tokens.accent}; color: {tokens.accent_ink};
@@ -105,8 +139,8 @@ def desktop_stylesheet(tokens: ThemeTokens = TOKENS) -> str:
     QPushButton#navButton:hover {{ background: {tokens.surface}; color: {tokens.text}; }}
     QPushButton#navButton:focus {{ border: 1px solid {tokens.accent}; }}
     QPushButton#navButton[active="true"] {{
-        background: {tokens.surface_raised}; color: {tokens.accent};
-        border: 1px solid {tokens.border_strong};
+        background: {tokens.nav_surface or tokens.surface_raised}; color: {tokens.accent};
+        border: 1px solid {tokens.nav_surface or tokens.border_strong};
     }}
     QLabel#pageTitle {{ font-size: 29px; font-weight: 780; color: {tokens.text}; }}
     QLabel#pageIntro {{ font-size: 14px; color: {tokens.text_muted}; }}
@@ -118,13 +152,13 @@ def desktop_stylesheet(tokens: ThemeTokens = TOKENS) -> str:
         border-radius: {tokens.radius}px;
     }}
     QFrame#overallStatusCard {{
-        background: {tokens.surface_raised}; border: 1px solid {tokens.border_strong};
+        background: {tokens.banner_surface or tokens.surface_raised}; border: 1px solid {tokens.banner_surface or tokens.border_strong};
     }}
     QLabel#overallIcon {{
         background: transparent; border: 0;
         font-size: 20px; font-weight: 800;
     }}
-    QLabel#overallIcon[tone="success"] {{ color: {tokens.accent}; }}
+    QLabel#overallIcon[tone="success"] {{ color: #FFFFFF; background: {tokens.accent_deep}; border-radius: 16px; }}
     QLabel#overallIcon[tone="info"] {{ color: {tokens.accent}; }}
     QLabel#overallIcon[tone="warning"] {{ color: {tokens.warning}; }}
     QLabel#overallIcon[tone="error"] {{ color: {tokens.error}; }}
@@ -145,7 +179,7 @@ def desktop_stylesheet(tokens: ThemeTokens = TOKENS) -> str:
         border-radius: 10px; padding: 4px 9px; font-size: 10px; font-weight: 800;
     }}
     QLabel#statusPill[tone="success"] {{
-        color: {tokens.accent}; background: {tint(tokens.accent, 24)}; border: 1px solid {tint(tokens.accent, 80)};
+        color: {tokens.accent}; background: {tokens.badge_surface or tint(tokens.accent, 24)}; border: 1px solid {tokens.badge_surface or tint(tokens.accent, 80)};
     }}
     QLabel#statusPill[tone="warning"] {{
         color: {tokens.warning}; background: {tint(tokens.warning, 20)}; border: 1px solid {tint(tokens.warning, 80)};
@@ -233,12 +267,12 @@ def desktop_stylesheet(tokens: ThemeTokens = TOKENS) -> str:
     QPushButton:focus {{ border: 1px solid {tokens.accent}; }}
     QPushButton:disabled {{ color: {tokens.text_faint}; background: {tokens.surface_sunken}; }}
     QPushButton#primaryButton {{
-        background: {tokens.accent_deep}; color: #E8FFF0; border: 1px solid {tokens.accent};
+        background: {tokens.accent_deep}; color: #FFFFFF; border: 1px solid {tokens.accent};
     }}
     QPushButton#primaryButton:hover {{ background: {tokens.accent_hover}; }}
     QPushButton#secondaryButton {{
-        background: {tokens.surface_raised}; border: 1px solid {tokens.border_strong};
-        border-radius: 8px; color: {tokens.text}; padding: 8px 14px;
+        background: {tokens.secondary_surface or tokens.surface_raised}; border: 1px solid {tokens.secondary_border or tokens.border_strong};
+        border-radius: 8px; color: {tokens.secondary_ink or tokens.text}; padding: 8px 14px;
     }}
     QPushButton#secondaryButton:hover {{ border-color: {tokens.accent}; color: {tokens.accent}; }}
     QPushButton#secondaryButton:disabled {{ color: {tokens.text_muted}; border-color: {tokens.border}; }}
@@ -316,20 +350,20 @@ def desktop_stylesheet(tokens: ThemeTokens = TOKENS) -> str:
     QPushButton#disclosureToggle:hover {{ color: {tokens.text}; }}
     QPushButton#disclosureToggle:checked {{ color: {tokens.accent}; }}
     QFrame#appFooter {{
-        background: {tokens.background_deep};
-        border-top: 1px solid {tokens.border};
+        background: {tokens.header_surface or tokens.background_deep};
+        border-top: 1px solid {tokens.header_surface or tokens.border};
     }}
     QLabel#footerPromise {{ color: {tokens.text_faint}; font-size: 12px; }}
     QLabel#footerVersion {{ color: {tokens.text_faint}; font-size: 12px; }}
-    QLabel#wordmarkPrimary {{ font-size: 21px; font-weight: 800; color: {tokens.text}; }}
-    QLabel#wordmarkAccent {{ font-size: 21px; font-weight: 800; color: {tokens.accent}; }}
+    QLabel#wordmarkPrimary {{ font-size: 27px; font-weight: 800; color: {tokens.text}; }}
+    QLabel#wordmarkAccent {{ font-size: 27px; font-weight: 800; color: {tokens.accent}; }}
     QLabel#wordmarkQualifier {{ font-size: 12px; font-weight: 650; color: {tokens.text_muted}; }}
     QLabel#metricLabel {{ color: {tokens.text_soft}; font-size: 12px; font-weight: 650; }}
     QProgressBar#usageBar, QProgressBar#weeklyBar {{
-        background: {tokens.surface_sunken}; border: 0; border-radius: 3px;
+        background: {tokens.progress_track or tokens.surface_sunken}; border: 0; border-radius: 5px;
     }}
-    QProgressBar#usageBar::chunk {{ background: {tokens.accent}; border-radius: 3px; }}
-    QProgressBar#weeklyBar::chunk {{ background: {tokens.accent}; border-radius: 3px; }}
+    QProgressBar#usageBar::chunk {{ background: {tokens.progress_fill or tokens.accent}; border-radius: 5px; }}
+    QProgressBar#weeklyBar::chunk {{ background: {tokens.progress_fill or tokens.accent}; border-radius: 5px; }}
     QLabel#trustChip {{
         color: {tokens.accent}; background: {tokens.surface_sunken};
         border: 1px solid {tokens.accent_deep}; border-radius: {tokens.radius_small}px;

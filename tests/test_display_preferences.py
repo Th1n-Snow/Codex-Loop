@@ -52,6 +52,8 @@ class DisplayPreferencesTests(unittest.TestCase):
         combo=self.w.appearance_panel.language_combo
         combo.setCurrentIndex(combo.findData('en'))
         self.assertEqual('en',self.c.store.load().ui_language)
+        self.w.refresh_clock()
+        self.assertIn('Usage refreshes automatically',self.w.provider_cards['codex'].sync_button.toolTip())
         self.assertEqual('Save and use these times',self.w.multi_time_panel.save_button.text())
         self.assertEqual('Warm-up self-test',self.w.provider_cards['codex'].verify_button.text())
         self.assertIn('System',[button.text() for button in self.w.appearance_panel.theme_buttons.values()])
@@ -61,6 +63,9 @@ class DisplayPreferencesTests(unittest.TestCase):
         combo.setCurrentIndex(combo.findData('zh_CN'))
         self.assertEqual('保存并使用这些时间',self.w.multi_time_panel.save_button.text())
         self.assertEqual('预热自检',self.w.provider_cards['codex'].verify_button.text())
+        self.w.refresh_clock()
+        self.assertIn('仪表盘约每分钟一次',self.w.provider_cards['codex'].sync_button.toolTip())
+        self.assertNotIn('Usage refreshes automatically',self.w.provider_cards['codex'].sync_button.toolTip())
         self.assertTrue(self.w.multi_time_panel.dirty)
     def test_system_changes_only_apply_when_following_system(self):
         with patch('sentinel.appearance.system_is_light',return_value=True):
@@ -85,6 +90,58 @@ class DisplayPreferencesTests(unittest.TestCase):
         self.assertEqual('Model: gpt-6-luna。',label.text())
         self.assertEqual('zh_CN',combo.itemData(0))
         label.deleteLater()
+
+    def test_peach_theme_persists_and_switching_preserves_schedule_draft(self):
+        self.w.multi_time_panel.editors[0].setTime(QTime(9,17))
+        draft=self.w.multi_time_panel.values()
+        schedule=self.c.settings.multi_start_times
+        self.w.appearance_panel.color_buttons['peach'].click()
+        self.assertEqual('peach',self.c.store.load().color_theme)
+        self.assertEqual('#17181C',TOKENS.background)
+        self.w.appearance_panel.theme_buttons['light'].click()
+        self.assertEqual('#FEF5F9',TOKENS.background)
+        self.assertEqual('#CD6588',TOKENS.progress_fill)
+        self.assertEqual('#FCD9E1',TOKENS.progress_track)
+        self.assertEqual(schedule,self.c.settings.multi_start_times)
+        self.assertEqual(draft,self.w.multi_time_panel.values())
+        self.assertTrue(self.w.multi_time_panel.dirty)
+        self.assertFalse(self.w.active_operations)
+        from sentinel.appearance import AppearanceManager
+        from PySide6.QtWidgets import QWidget
+        restored=QWidget()
+        manager=AppearanceManager(restored,self.c.store.load())
+        manager.apply_theme('light')
+        self.assertEqual('#FEF5F9',TOKENS.background)
+        restored.deleteLater()
+        self.w.appearance_panel.color_buttons['classic'].click()
+        self.assertEqual('#F5F7F5',TOKENS.background)
+        self.assertIsNone(TOKENS.progress_fill)
+
+    def test_peach_system_theme_and_failed_save(self):
+        self.w._color_theme_selected('peach')
+        with patch('sentinel.appearance.system_is_light',return_value=True):
+            self.w._theme_selected('system')
+            self.assertEqual('#FEF5F9',TOKENS.background)
+        with patch('sentinel.appearance.system_is_light',return_value=False):
+            self.w.appearance_manager._system_changed()
+            self.assertEqual('#17181C',TOKENS.background)
+        with patch.object(self.c,'set_display_preferences',return_value=False):
+            self.w.appearance_panel.color_buttons['classic'].click()
+        self.assertTrue(self.w.appearance_panel.color_buttons['peach'].isChecked())
+        self.assertEqual('#17181C',TOKENS.background)
+        self.c.store.path.write_text(json.dumps({'settings':{'color_theme':[]}}))
+        self.assertEqual('classic',self.c.store.load().color_theme)
+
+    def test_simplified_automation_card_retains_history_and_switch(self):
+        card=self.w.schedule_card
+        self.assertFalse(hasattr(card,'pause_button'))
+        self.assertFalse(hasattr(card,'manage_button'))
+        self.assertEqual('最近预热记录',card.history_button.text())
+        self.assertIs(self.w.dashboard_automation_toggle,card.automation_toggle)
+        self.w._language_selected('en')
+        self.assertEqual('Peach blossom',self.w.appearance_panel.color_buttons['peach'].text())
+        self.w._language_selected('zh_CN')
+        self.assertEqual('桃夭',self.w.appearance_panel.color_buttons['peach'].text())
 
     def test_enable_confirmation_body_translates_with_real_paragraph_breaks(self):
         from PySide6.QtCore import QTimer

@@ -257,8 +257,12 @@ class ApplicationController:
             replace(self.settings, weekly_start_times=weekly_times)
         )
 
-    def set_display_preferences(self, *, theme_mode=None, ui_language=None) -> bool:
+    def set_display_preferences(self, *, theme_mode=None, ui_language=None, color_theme=None) -> bool:
         changes = {}
+        if color_theme is not None:
+            if color_theme not in {"classic", "peach"}:
+                raise ValueError("Invalid color theme")
+            changes["color_theme"] = color_theme
         if theme_mode is not None:
             if theme_mode not in {"system", "light", "dark"}:
                 raise ValueError("Invalid theme mode")

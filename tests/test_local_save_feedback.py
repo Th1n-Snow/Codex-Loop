@@ -45,6 +45,12 @@ class SaveFeedbackTests(unittest.TestCase):
         self.assertTrue(panel.dirty)
         self.assertIn('未保存',panel.save_feedback.text())
         self.assertFalse(panel.feedback_timer.isActive())
+        self.assertEqual('warning',panel.mode_label.property('tone'))
+        self.assertFalse(panel.save_feedback.isHidden())
+        panel.editors[0].setTime(QTime(12,0))
+        self.assertFalse(panel.dirty)
+        self.assertEqual('success',panel.mode_label.property('tone'))
+        self.assertTrue(panel.save_feedback.isHidden())
         panel.deleteLater()
 
     def test_settings_schedule_module_is_removed_and_save_is_confirmed(self):

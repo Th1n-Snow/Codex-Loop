@@ -250,7 +250,7 @@ class UpdatePanel(QFrame):
                 return
             if result.status == "latest":
                 self.release = None
-                message = f"You are on the latest version ({PRODUCT.version})."
+                message = f"You are on the latest version (v{PRODUCT.version})."
                 if self._checking_model_support:
                     message += (
                         " Support for the changed Codex model lineup may require "

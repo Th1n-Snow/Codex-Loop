@@ -161,7 +161,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(PRODUCT.display_name)
         self.setWindowIcon(make_app_icon())
         self.setMinimumSize(720, 560)
-        self.resize(1040, 720)
+        self.resize(1120, 800)
         self.setStyleSheet(desktop_stylesheet())
 
         app_root = QWidget()
@@ -187,7 +187,6 @@ class MainWindow(QMainWindow):
         self.dashboard_automation_toggle.toggled.connect(
             self._automation_toggled
         )
-        self.schedule_card.pause_button.clicked.connect(self.toggle_temporary_pause)
         self.startup_toggle.toggled.connect(self._startup_toggled)
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.refresh_clock)
@@ -223,10 +222,9 @@ class MainWindow(QMainWindow):
         brand_layout = QHBoxLayout(brand)
         brand_layout.setContentsMargins(0, 0, 0, 0)
         brand_layout.setSpacing(12)
-        mark = QLabel()
-        # The mark supports the wordmark rather than competing with it.
-        mark.setPixmap(render_mark(36))
-        mark.setFixedSize(36, 36)
+        from .dashboard_art import LoopMark
+        mark = LoopMark()
+        mark.setFixedSize(48, 48)
         brand_layout.addWidget(mark)
 
         identity = QVBoxLayout()
@@ -276,6 +274,11 @@ class MainWindow(QMainWindow):
         return header
 
     def eventFilter(self, watched, event):
+        if watched is getattr(self, "dashboard_viewport", None) and event.type() == QEvent.Type.Resize:
+            from PySide6.QtWidgets import QBoxLayout
+            cards = getattr(self, "dashboard_cards_layout", None)
+            if cards is not None:
+                cards.setDirection(QBoxLayout.Direction.TopToBottom if watched.width() < 860 else QBoxLayout.Direction.LeftToRight)
         if watched is getattr(self, "header_widget", None) and event.type() == QEvent.Type.Resize:
             self._fit_header()
         return super().eventFilter(watched, event)
@@ -352,17 +355,21 @@ class MainWindow(QMainWindow):
         )
         self.dashboard_clarifier.setProperty("muted", True)
         self.dashboard_clarifier.setWordWrap(True)
-        root.addWidget(self.dashboard_clarifier)
+        root.itemAt(0).widget().hide()
+        self.dashboard_intro.hide()
+        self.dashboard_clarifier.hide()
+        root.setContentsMargins(20, 10, 20, 10)
+        root.setSpacing(10)
         overall = QFrame()
         overall.setObjectName("overallStatusCard")
         overall_layout = QHBoxLayout(overall)
-        overall_layout.setContentsMargins(22, 17, 22, 17)
+        overall_layout.setContentsMargins(18, 12, 18, 12)
         overall_layout.setSpacing(16)
         self.overall_icon = QLabel("✓")
         self.overall_icon.setObjectName("overallIcon")
         self.overall_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.overall_icon.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.overall_icon.setFixedSize(30, 30)
+        self.overall_icon.setFixedSize(32, 32)
         overall_layout.addWidget(self.overall_icon)
         overall_copy = QVBoxLayout()
         overall_copy.setSpacing(3)
@@ -380,13 +387,16 @@ class MainWindow(QMainWindow):
         overall_layout.addLayout(overall_copy, 1)
         self.automation_state_label = StatusPill()
         self.automation_state_label.setFixedHeight(28)
-        overall_layout.addWidget(self.automation_state_label)
+        self.automation_state_label.hide()
         root.addWidget(overall)
         self.multi_time_panel = MultiTimePanel(self.controller.settings)
         self.multi_time_panel.saved.connect(self._save_multi_times)
         root.addWidget(self.multi_time_panel)
 
+        self.dashboard_viewport = page.viewport()
+        self.dashboard_viewport.installEventFilter(self)
         provider_row = QHBoxLayout()
+        self.dashboard_cards_layout = provider_row
         provider_row.setSpacing(16)
         for provider_id, state in self.controller.states.items():
             card = ProviderCard(state)
@@ -403,44 +413,40 @@ class MainWindow(QMainWindow):
                 lambda checked=False: self._check_updates_for_model_support()
             )
             self.provider_cards[provider_id] = card
-            provider_row.addWidget(card, 1)
+            provider_row.addWidget(card, 4)
         self.schedule_card = ScheduleCard()
         self.dashboard_automation_toggle = self.schedule_card.automation_toggle
-        self.schedule_card.manage_button.setText("编辑预热时间")
-        self.schedule_card.manage_button.clicked.connect(self._focus_multi_times)
         self.last_action_label = self.schedule_card.last_action_label
         self.schedule_card.history_button.clicked.connect(self.show_recent_starts)
-        provider_row.addWidget(self.schedule_card, 1)
+        provider_row.addWidget(self.schedule_card, 3)
         root.addLayout(provider_row)
 
         weekly = QFrame()
         weekly.setObjectName("weeklySafetyCard")
-        weekly_layout = QVBoxLayout(weekly)
-        weekly_layout.setContentsMargins(20, 14, 20, 14)
-        weekly_layout.setSpacing(8)
-        weekly_header = QHBoxLayout()
+        weekly_layout = QHBoxLayout(weekly)
+        weekly_layout.setContentsMargins(18, 12, 18, 12)
+        weekly_layout.setSpacing(18)
+        weekly_copy = QVBoxLayout()
         weekly_title = QLabel("Weekly allowance")
         weekly_title.setObjectName("providerName")
-        weekly_header.addWidget(weekly_title)
-        weekly_header.addStretch()
-        self.weekly_status = StatusPill()
-        weekly_header.addWidget(self.weekly_status)
-        weekly_layout.addLayout(weekly_header)
-        weekly_metrics = QHBoxLayout()
-        weekly_metrics.setSpacing(14)
-        self.weekly_value = QLabel()
-        self.weekly_value.setObjectName("weeklyValue")
-        weekly_metrics.addWidget(self.weekly_value)
+        weekly_copy.addWidget(weekly_title)
         self.weekly_detail = QLabel()
         self.weekly_detail.setProperty("muted", True)
-        weekly_metrics.addWidget(self.weekly_detail, 1, Qt.AlignmentFlag.AlignVCenter)
-        weekly_layout.addLayout(weekly_metrics)
+        self.weekly_detail.setWordWrap(True)
+        weekly_copy.addWidget(self.weekly_detail)
+        weekly_layout.addLayout(weekly_copy)
+        self.weekly_status = StatusPill()
+        self.weekly_status.hide()
         self.weekly_bar = QProgressBar()
         self.weekly_bar.setObjectName("weeklyBar")
         self.weekly_bar.setRange(0, 100)
         self.weekly_bar.setTextVisible(False)
-        self.weekly_bar.setFixedHeight(6)
-        weekly_layout.addWidget(self.weekly_bar)
+        self.weekly_bar.setFixedHeight(14)
+        weekly_layout.addWidget(self.weekly_bar, 1)
+        self.weekly_value = QLabel()
+        self.weekly_value.setObjectName("secondaryMetric")
+        weekly_layout.addWidget(self.weekly_value)
+        weekly_layout.addWidget(self.weekly_status)
         root.addWidget(weekly)
 
         # A little slack above and more below reads as deliberate spacing
@@ -489,6 +495,13 @@ class MainWindow(QMainWindow):
         else:
             self.appearance_panel.failed(self.controller.settings)
 
+    def _color_theme_selected(self, color_theme: str) -> None:
+        if self.controller.set_display_preferences(color_theme=color_theme):
+            self.appearance_manager.apply_color_theme(color_theme)
+            self.appearance_panel.saved()
+        else:
+            self.appearance_panel.failed(self.controller.settings)
+
     def _language_selected(self, language: str) -> None:
         if self.controller.set_display_preferences(ui_language=language):
             self.appearance_manager.apply_language(language)
@@ -508,6 +521,7 @@ class MainWindow(QMainWindow):
 
         self.appearance_panel = AppearancePanel(self.controller.settings)
         self.appearance_panel.theme_selected.connect(self._theme_selected)
+        self.appearance_panel.color_theme_selected.connect(self._color_theme_selected)
         self.appearance_panel.language_selected.connect(self._language_selected)
         root.addWidget(self.appearance_panel)
 
@@ -807,19 +821,6 @@ class MainWindow(QMainWindow):
             "PAUSED · ON" if paused else ("ON" if enabled else "OFF"),
             "info" if paused else ("success" if enabled else "neutral"),
         )
-        pause_button = self.schedule_card.pause_button
-        pause_button.setVisible(
-            paused or (self.controller.settings.automation_enabled
-                       and self.controller.settings.schedule_mode in {DAILY, WEEKLY, MULTI})
-        )
-        pause_button.setText("Resume automation" if paused else "Pause until tomorrow")
-        pause_button.setEnabled(enabled and not self.active_operations)
-        target = self.controller.settings.tomorrow_first_start(current)
-        pause_button.setToolTip(
-            "Wait for the current operation to finish." if self.active_operations else
-            ("Return to your saved schedule." if paused else
-             f"Pause until tomorrow's first start: {pause_until_text(target)}" if target is not None else "")
-        )
         for provider_id, state in self.controller.states.items():
             operational = operational_presentation(
                 self.controller.settings, state, now=current,
@@ -871,13 +872,14 @@ class MainWindow(QMainWindow):
                 operational.tone,
             )
             self.overall_title.setText(operational.banner_title)
-            self.overall_detail.setText(operational.banner_detail)
+            self.overall_detail.setText("Follows your saved warm-up times" if operational.tone == "success" else operational.banner_detail)
 
             if codex.weekly_used_percent is None:
                 self.weekly_value.setText("—")
                 self.weekly_detail.setText("Not available in the last read-only sync")
                 self.weekly_bar.setValue(0)
                 self.weekly_status.set_status("NOT CHECKED", "neutral")
+                self.weekly_status.show()
             else:
                 try:
                     weekly_reset = (
@@ -890,12 +892,15 @@ class MainWindow(QMainWindow):
                 except (OSError, OverflowError, ValueError):
                     weekly_reset = "reset time unavailable"
                 self.weekly_detail.setText(
-                    f"剩余 {max(0.0, min(100.0, 100.0 - codex.weekly_used_percent)):g}% · 已用 {codex.weekly_used_percent:g}% · 重置于 {weekly_reset}"
+                    f"剩余 {max(0.0, min(100.0, 100.0 - codex.weekly_used_percent)):g}% · 已用 {codex.weekly_used_percent:g}%"
+                )
+                self.weekly_detail.setToolTip(f"重置于 {weekly_reset}"
                 )
                 self.weekly_value.setText(f"{max(0.0, min(100.0, 100.0 - codex.weekly_used_percent)):g}%")
                 self.weekly_bar.setValue(round(max(0.0, min(100.0, 100.0 - codex.weekly_used_percent))))
                 self.weekly_bar.setAccessibleName("每周剩余额度")
                 weekly_safe = codex.weekly_used_percent < WEEKLY_PROTECTION_PERCENT
+                self.weekly_status.setVisible(not weekly_safe)
                 self.weekly_status.set_status(
                     "SAFE" if weekly_safe else "PROTECTED",
                     "success" if weekly_safe else "warning",

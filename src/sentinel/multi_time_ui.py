@@ -1,5 +1,5 @@
 """Dashboard editor for an explicit daily list of warm-up appointments."""
-from PySide6.QtCore import QTime, QTimer, Signal
+from PySide6.QtCore import QTime, QTimer, Signal, Qt
 from PySide6.QtWidgets import QFrame,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QMessageBox
 from .ui_components import TimeEntry
 from .ui_theme import feedback_style
@@ -16,19 +16,24 @@ class MultiTimePanel(QFrame):
         layout.setSpacing(10)
         header=QHBoxLayout()
         title=QLabel('每天多个时间')
-        title.setObjectName('sectionTitle')
+        title.setObjectName('providerName')
         header.addWidget(title)
         header.addStretch()
         self.mode_label=QLabel()
-        self.mode_label.setProperty('muted',True)
+        self.mode_label.setObjectName('statusPill')
+        self.mode_label.setProperty('tone','success')
         header.addWidget(self.mode_label)
         layout.addLayout(header)
-        note=QLabel('每天按设定时间执行预热检查；电脑休眠时错过的时间点不会集中补发。')
+        note=QLabel('Checks warm-up at your scheduled times each day')
+        note.setToolTip('每天按设定时间执行预热检查；电脑休眠时错过的时间点不会集中补发。')
         note.setProperty('muted',True)
         note.setWordWrap(True)
         layout.addWidget(note)
         self.grid=QGridLayout()
-        self.grid.setSpacing(8)
+        self.grid.setHorizontalSpacing(24)
+        self.grid.setVerticalSpacing(12)
+        self.grid.setColumnStretch(0,1)
+        self.grid.setColumnStretch(1,1)
         layout.addLayout(self.grid)
         self.editors=[]
         self.dirty=False
@@ -38,6 +43,11 @@ class MultiTimePanel(QFrame):
         self.add_button.clicked.connect(self.add_time)
         actions.addWidget(self.add_button)
         actions.addStretch()
+        self.status=QLabel()
+        self.status.setProperty("muted",True)
+        self.status.setWordWrap(True)
+        self.status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        actions.addWidget(self.status,1)
         self.save_button=QPushButton('保存并使用这些时间')
         self.save_button.setObjectName('primaryButton')
         self.save_button.clicked.connect(self.save)
@@ -46,15 +56,12 @@ class MultiTimePanel(QFrame):
         self.save_feedback=QLabel("")
         self.save_feedback.setObjectName("multiSaveFeedback")
         self.save_feedback.setWordWrap(True)
-        self.save_feedback.setMinimumHeight(22)
+        self.save_feedback.hide()
         layout.addWidget(self.save_feedback)
         self.feedback_timer=QTimer(self)
         self.feedback_timer.setSingleShot(True)
         self.feedback_timer.timeout.connect(self._clear_feedback)
-        self.status=QLabel()
-        self.status.setProperty('muted',True)
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
+
         self.set_times(settings.multi_start_times)
         self.update_status(settings,datetime.now().timestamp())
 
@@ -108,15 +115,27 @@ class MultiTimePanel(QFrame):
         self.save_button.setText("保存并使用这些时间")
         if not self.dirty:
             self.save_feedback.clear()
+            self.save_feedback.hide()
             self.update_status(self._settings,datetime.now().timestamp())
             return
+        self.save_feedback.show()
         feedback_style(self.save_feedback, "warning")
         self.save_feedback.setText("有未保存的修改，点击保存后才会应用。")
         self.mode_label.setText("有未保存的修改")
+        self._refresh_mode_tone()
+
+    def _refresh_mode_tone(self):
+        tone='warning' if self.dirty else 'success' if self._settings.schedule_mode==MULTI else 'neutral'
+        if self.mode_label.property('tone')!=tone:
+            self.mode_label.setProperty('tone',tone)
+            self.mode_label.style().unpolish(self.mode_label)
+            self.mode_label.style().polish(self.mode_label)
 
     def show_save_success(self, settings):
         self._saved_values=normalize_multi_times(settings.multi_start_times)
         self.dirty=False
+        self._settings=settings
+        self._refresh_mode_tone()
         self.save_button.setText("✓ 已保存")
         feedback_style(self.save_feedback, "success", bold=True)
         if not settings.automation_enabled:
@@ -125,18 +144,22 @@ class MultiTimePanel(QFrame):
             text="✓ 保存成功，已选用此时间表；自动预热目前暂停中。"
         else:
             text="✓ 保存成功，时间表已生效。"
+        self.save_feedback.show()
         self.save_feedback.setText(text)
         self.feedback_timer.start(6000)
 
     def show_save_error(self, text):
         self.feedback_timer.stop()
         self.save_button.setText("保存并使用这些时间")
+        self.save_feedback.show()
         feedback_style(self.save_feedback, "error")
         self.save_feedback.setText("保存失败："+text)
 
     def _clear_feedback(self):
         self.save_button.setText("保存并使用这些时间")
-        if not self.dirty:self.save_feedback.clear()
+        if not self.dirty:
+            self.save_feedback.clear()
+            self.save_feedback.hide()
 
     def save(self):
         values=normalize_multi_times(self.values())
@@ -148,6 +171,8 @@ class MultiTimePanel(QFrame):
     def update_status(self,settings,now):
         self._settings=settings
         selected=settings.schedule_mode==MULTI
+        self._refresh_mode_tone()
+        self.status.setToolTip("")
         self.mode_label.setText('有未保存的修改' if self.dirty else
                                 '正在使用此计划' if selected else '尚未选用此计划')
         if not selected:
@@ -167,5 +192,5 @@ class MultiTimePanel(QFrame):
         else:next_text='请添加预热时间。'
         if settings.multi_last_slot is not None:
             at=datetime.fromtimestamp(settings.multi_last_slot)
-            next_text+=f'　上次计划：{at:%m-%d %H:%M} · {settings.multi_last_status}'
+            self.status.setToolTip(f'上次计划：{at:%m-%d %H:%M} · {settings.multi_last_status}')
         self.status.setText(next_text)

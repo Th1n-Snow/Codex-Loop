@@ -25,13 +25,14 @@ class AppearanceManager(QObject):
         super().__init__(window)
         self.window=window
         self.mode=settings.theme_mode
+        self.color_theme=settings.color_theme
         self.caption_timer=QTimer(self)
         self.caption_timer.setSingleShot(True)
         self.caption_timer.timeout.connect(self.apply_native_caption)
         window.installEventFilter(self)
         zh_cn.install()
         zh_cn.set_language(settings.ui_language,QApplication.instance())
-        select_theme(system_is_light() if self.mode=='system' else self.mode=='light')
+        select_theme(system_is_light() if self.mode=='system' else self.mode=='light', self.color_theme)
         app=QApplication.instance()
         if app is not None:
             app.styleHints().colorSchemeChanged.connect(self._system_changed)
@@ -76,7 +77,7 @@ class AppearanceManager(QObject):
     def apply_theme(self,mode):
         self.mode=mode
         light=system_is_light() if mode=='system' else mode=='light'
-        select_theme(light)
+        select_theme(light, self.color_theme)
         app=QApplication.instance()
         if app is None:return
         palette=QPalette()
@@ -101,9 +102,19 @@ class AppearanceManager(QObject):
         for widget in app.allWidgets():
             role=widget.property('colorRole')
             if role:feedback_style(widget,role,bold=bool(widget.property('feedbackBold')))
+            kind=widget.property("dashboardGlyph")
+            if kind:
+                from .dashboard_art import action_icon
+                from PySide6.QtCore import QSize
+                widget.setIcon(action_icon(kind))
+                widget.setIconSize(QSize(18,18))
             widget.update()
         self.apply_native_caption()
         self.caption_timer.start(0)
+
+    def apply_color_theme(self,color_theme):
+        self.color_theme=color_theme
+        self.apply_theme(self.mode)
 
     def apply_language(self,language):
         zh_cn.set_language(language,QApplication.instance())
@@ -135,6 +146,7 @@ class LanguageComboBox(QComboBox):
 
 class AppearancePanel(QFrame):
     theme_selected=Signal(str)
+    color_theme_selected=Signal(str)
     language_selected=Signal(str)
     def __init__(self,settings,parent=None):
         super().__init__(parent)
@@ -152,6 +164,16 @@ class AppearancePanel(QFrame):
             button.clicked.connect(lambda checked=False,value=key:self.theme_selected.emit(value) if checked else None)
             row.addWidget(button)
         row.addStretch();layout.addLayout(row)
+        colors=QHBoxLayout();colors.addWidget(QLabel('Theme color'))
+        self.color_group=QButtonGroup(self);self.color_buttons={}
+        for key,text in (('classic','Classic mint'),('peach','Peach blossom')):
+            button=QRadioButton(text);button.setAccessibleName(text)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.color_group.addButton(button);self.color_buttons[key]=button
+            button.setChecked(settings.color_theme==key)
+            button.clicked.connect(lambda checked=False,value=key:self.color_theme_selected.emit(value) if checked else None)
+            colors.addWidget(button)
+        colors.addStretch();layout.addLayout(colors)
         lang=QHBoxLayout();lang.addWidget(QLabel('Language'))
         self.language_combo=LanguageComboBox();self.language_combo.setAccessibleName('Language')
         self.language_combo.addItem('简体中文','zh_CN');self.language_combo.addItem('English','en')
@@ -162,6 +184,8 @@ class AppearancePanel(QFrame):
         self.feedback=QLabel('');self.feedback.setWordWrap(True);layout.addWidget(self.feedback)
 
     def restore(self,settings):
+        for key,button in self.color_buttons.items():
+            blocked=button.blockSignals(True);button.setChecked(key==settings.color_theme);button.blockSignals(blocked)
         for key,button in self.theme_buttons.items():
             blocked=button.blockSignals(True);button.setChecked(key==settings.theme_mode);button.blockSignals(blocked)
         blocked=self.language_combo.blockSignals(True)

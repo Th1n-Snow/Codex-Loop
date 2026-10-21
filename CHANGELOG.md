@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 — 2026-10-21
+
+- Add independent Classic Mint / Peach Blossom theme colors with system, light and dark modes.
+- Redesign the dashboard, quota bars, action icons and responsive card layout.
+- Simplify the automation card while retaining daily time editing and tray pause controls.
+- Improve saved/unsaved feedback, automatic-sync tooltips and version formatting.
+- Preserve schedules and history; verify 419 release checks and 96 UI combinations.
+
 ## 1.0.1 — 2026-10-20
 
 - Remove automatic reset-boundary chaining. Automatic warm-up is admitted only through the saved daily appointments queue.

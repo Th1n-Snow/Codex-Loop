@@ -49,6 +49,7 @@ class AppSettings:
     multi_pending_due: float | None = None
     multi_pending_runtime: str = ""
     theme_mode: str = "system"
+    color_theme: str = "classic"
     ui_language: str = "zh_CN"
 
     def pause_active(self, now: float) -> bool:
@@ -420,6 +421,7 @@ class AppStateStore:
             multi_pending_due=None if retired_schedule else _pending_timestamp(settings.get("multi_pending_due")),
             multi_pending_runtime="" if retired_schedule else str(settings.get("multi_pending_runtime", ""))[:200],
             theme_mode=settings.get("theme_mode") if isinstance(settings.get("theme_mode"), str) and settings.get("theme_mode") in {"system", "light", "dark"} else "system",
+            color_theme=settings.get("color_theme") if isinstance(settings.get("color_theme"), str) and settings.get("color_theme") in {"classic", "peach"} else "classic",
             ui_language=settings.get("ui_language") if isinstance(settings.get("ui_language"), str) and settings.get("ui_language") in {"zh_CN", "en"} else "zh_CN",
         )
 
