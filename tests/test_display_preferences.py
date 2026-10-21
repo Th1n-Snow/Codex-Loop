@@ -143,6 +143,31 @@ class DisplayPreferencesTests(unittest.TestCase):
         self.w._language_selected('zh_CN')
         self.assertEqual('桃夭',self.w.appearance_panel.color_buttons['peach'].text())
 
+    def test_blocked_provider_check_is_localized_and_peach_stripe_is_pink(self):
+        from sentinel.ui_theme import desktop_stylesheet
+        self.c.states['codex']=replace(self.c.states['codex'],status='Needs attention',
+            automation_supported=False,detail='The last provider check was inconclusive.')
+        self.w._color_theme_selected('peach')
+        self.w._language_selected('zh_CN')
+        self.w.refresh_clock()
+        card=self.w.provider_cards['codex']
+        self.assertEqual('预热已暂停',card.countdown_label.text())
+        self.assertIn('上次 Codex 检查未能确认状态',card.detail_label.text())
+        self.assertEqual('warning',card.property('tone'))
+        self.assertEqual('需要处理',card.status_label.text())
+        for mode,color in (('light','#B72159'),('dark','#D38AA1')):
+            self.w._theme_selected(mode)
+            self.assertEqual(color,TOKENS.warning_stripe)
+            self.assertIn('QFrame#providerCard[tone="warning"] { border-left: 3px solid '+color,desktop_stylesheet())
+            self.assertNotEqual(TOKENS.warning,TOKENS.warning_stripe)
+        self.w._language_selected('en')
+        self.w.refresh_clock()
+        self.assertEqual('Start blocked',card.countdown_label.text())
+        self.assertEqual('The last provider check was inconclusive.',card.detail_label.text())
+        self.w._language_selected('zh_CN')
+        self.w.refresh_clock()
+        self.assertEqual('预热已暂停',card.countdown_label.text())
+
     def test_enable_confirmation_body_translates_with_real_paragraph_breaks(self):
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QMessageBox

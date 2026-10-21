@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 — 2026-10-21
+
+- Translate blocked/inconclusive provider checks and related error states in Chinese, including combined tray and tooltip messages.
+- Use the Peach Blossom accent for warning stripes while retaining warning badges, icons and safety behavior.
+- Add an actual-widget localization regression; 420 release checks pass.
+
 ## 1.1.0 — 2026-10-21
 
 - Add independent Classic Mint / Peach Blossom theme colors with system, light and dark modes.

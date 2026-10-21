@@ -32,6 +32,7 @@ class ThemeTokens:
     nav_surface: str | None = None
     secondary_border: str | None = None
     badge_surface: str | None = None
+    warning_stripe: str | None = None
     info: str = "#74C4FF"
     warning: str = "#F1D38A"
     error: str = "#FFB4AE"
@@ -64,7 +65,7 @@ PEACH_LIGHT_TOKENS = ThemeTokens(
     accent_hover="#A93F64", accent_ink="#FFFFFF", progress_fill="#CD6588",
     progress_track="#FCD9E1", secondary_ink="#B72159", secondary_surface="#FEF9FC",
     header_surface="#FEF5F9", banner_surface="#FCE8EE", nav_surface="#FADAE3",
-    secondary_border="#DF7899", badge_surface="#FCE3EC",
+    secondary_border="#DF7899", badge_surface="#FCE3EC", warning_stripe="#B72159",
     info="#85506D", warning="#956009", error="#B83248")
 PEACH_DARK_TOKENS = ThemeTokens(
     background="#17181C", background_deep="#17181C", surface="#202126",
@@ -74,7 +75,7 @@ PEACH_DARK_TOKENS = ThemeTokens(
     accent_hover="#B36782", accent_ink="#241A20", progress_fill="#C989A0",
     progress_track="#353039", secondary_ink="#EFECEF", secondary_surface="#202126",
     header_surface="#17181C", banner_surface="#202126", nav_surface="#49333E",
-    secondary_border="#737079", badge_surface="#3B2D35",
+    secondary_border="#737079", badge_surface="#3B2D35", warning_stripe="#D38AA1",
     info="#B7BCCF", warning="#E8C185", error="#FF9FAE")
 
 
@@ -324,7 +325,7 @@ def desktop_stylesheet(tokens: ThemeTokens = TOKENS) -> str:
     QLabel#updateState[status="error"] {{ color: {tokens.error}; }}
     QLabel#updateState[status="warning"] {{ color: {tokens.warning}; }}
     QFrame#providerCard[tone="success"] {{ border-left: 3px solid {tokens.accent}; }}
-    QFrame#providerCard[tone="warning"] {{ border-left: 3px solid {tokens.warning}; }}
+    QFrame#providerCard[tone="warning"] {{ border-left: 3px solid {tokens.warning_stripe or tokens.warning}; }}
     QFrame#providerCard[tone="error"] {{ border-left: 3px solid {tokens.error}; }}
     QFrame#providerCard[tone="info"] {{ border-left: 3px solid {tokens.info}; }}
     QFrame#cardRule {{

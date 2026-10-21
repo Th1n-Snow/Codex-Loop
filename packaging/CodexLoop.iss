@@ -2,7 +2,7 @@
   #define AppName "Codex Loop"
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.1.0"
+  #define AppVersion "1.1.1"
 #endif
 #ifndef AppExeName
   #define AppExeName "CodexLoop.exe"
