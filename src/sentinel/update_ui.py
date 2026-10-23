@@ -27,6 +27,8 @@ from .linux_update import (
     stage_update,
 )
 from .product import PRODUCT
+from . import zh_cn
+import re
 from .updates import (
     GitHubReleaseUpdater,
     ReleaseInfo,
@@ -271,11 +273,7 @@ class UpdatePanel(QFrame):
             self._set_state(
                 "available", f"Version {release.version} is available.", status="success"
             )
-            if release.notes:
-                self.notes_label.setText(
-                    "What changed\n" + "\n".join(f"• {note}" for note in release.notes)
-                )
-                self.notes_label.setVisible(True)
+            self.refresh_localized_release_notes()
             self.action_button.setText(
                 "Download installer" if self.is_windows else "Download update"
             )
@@ -318,6 +316,24 @@ class UpdatePanel(QFrame):
             self.dismiss_button.setVisible(True)
             return
         self._operation_failed(action, "The update result was not understood.")
+
+    def refresh_localized_release_notes(self) -> None:
+        if self.release is None or not self.release.notes:
+            self.notes_label.setVisible(False)
+            return
+        notes=self.release.notes
+        if zh_cn.current_language()=='zh_CN':
+            localized=[zh_cn.translate(note) for note in notes]
+            safe=[]
+            for note in localized:
+                prose=re.sub(r'https?://\S+|gpt-[A-Za-z0-9_.-]+','',note)
+                prose=re.sub(r'Codex\s+Loop|Codex|GitHub|Windows|Linux|OpenAI|SHA-256|API|MIT|x64|x86','',prose)
+                if re.search(r'[\u4e00-\u9fff]',note) and not re.search(r'[A-Za-z]{2,}',prose):safe.append(note)
+            if len(safe)!=len(localized):
+                safe.append('Some release notes are in another language. View the original under About → Releases.')
+            notes=safe
+        self.notes_label.setText('What changed\n'+'\n'.join(f'• {note}' for note in notes))
+        self.notes_label.setVisible(True)
 
     def _start_linux_install(self) -> None:
         staged = self.staged

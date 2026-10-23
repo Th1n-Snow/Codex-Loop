@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.3 — 2026-10-23
+
+- Complete Chinese operational, background-error, update, dialog, history and tray translations.
+- Preserve model labels during language switching and provide a Chinese fallback for foreign-language release notes.
+- Add state-driven localization coverage to the release gate: all 25 dashboard branches, 192 self-test combinations and 654 source messages; 428 checks pass.
+
 ## 1.1.2 — 2026-10-21
 
 - Remove the Windows main-window caption icon while keeping the in-app brand mark, taskbar/tray icons and normal window controls.

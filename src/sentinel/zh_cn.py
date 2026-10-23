@@ -292,10 +292,12 @@ def _translate_zh(text):
         return text
     if text in EXACT:
         return EXACT[text]
+    if "\n" in text:
+        return "\n".join(_translate_zh(line) for line in text.split("\n"))
     if text.startswith(('▸  ', '▾  ')):
         return text[:3]+translate(text[3:])
     result=text
-    for a,b in sorted(FRAGMENTS.items(),key=lambda p:len(p[0]),reverse=True):
+    for a,b in _CHINESE_PHRASES:
         result=result.replace(a,b)
     result=re.sub(r'(?<![A-Za-z])(\d+)h (\d+)m',lambda m:f'{m[1]} 小时 {m[2]} 分钟',result)
     result=re.sub(r'(?<![A-Za-z])(\d+)m (\d+)s',lambda m:f'{m[1]} 分 {m[2]} 秒',result)
@@ -303,6 +305,16 @@ def _translate_zh(text):
     # Windows strftime is locale-dependent; normalize English clock output too.
     result=re.sub(r'\b(\d{1,2}):(\d{2}) (AM|PM)\b', lambda m:f'{int(m[1])%12+(12 if m[3]=="PM" else 0):02d}:{m[2]}', result)
     result=re.sub(r'\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b',lambda m:{'Mon':'周一','Tue':'周二','Wed':'周三','Thu':'周四','Fri':'周五','Sat':'周六','Sun':'周日'}[m[0]],result)
+    months={name:index for index,name in enumerate(('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'),1)}
+    result=re.sub(r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2})(?:, (\d{4}))?',
+        lambda m:(m[3]+'-' if m[3] else '')+f'{months[m[1]]:02d}-{int(m[2]):02d}',result)
+    result=re.sub(r'(?<=[0-9]) at (?=\d{1,2}:\d{2})',' ',result)
+    result=re.sub(r'(周[一二三四五六日]) at (?=\d)',r'\1 ',result)
+    result=re.sub(r'(推理强度[：:]\s*)(minimal|low|medium|high|xhigh)\b',
+        lambda m:m[1]+{'minimal':'最低','low':'低','medium':'中','high':'高','xhigh':'极高'}[m[2]],result)
+    if '原始状态：' in result:
+        label,value=result.split('原始状态：',1)
+        result=label+'原始状态：'+EXACT.get(value.strip(),value.strip())
     return result
 
 
@@ -323,6 +335,18 @@ EXACT[
 )
 FRAGMENTS["Recent starts"] = "最近预热记录"
 FRAGMENTS["Usage refreshes automatically: about every minute on the dashboard and every five minutes in the background. Warm-ups take priority. Click to sync now."] = "额度会自动同步：仪表盘约每分钟一次，后台约每五分钟一次；预热任务优先。点击可立即同步。"
+from .i18n_catalog import MESSAGES, PHRASES
+EXACT.update(MESSAGES)
+FRAGMENTS.update(PHRASES)
+FRAGMENTS.update({key.strip("\n"):value.strip("\n") for key,value in PHRASES.items() if "\n" in key})
+EXACT["What changed"]="更新内容"
+
+# Exact entries must also work inside a tray prefix, tooltip or sentence
+# assembled from a runtime detail. Prefer longer phrases to shorter labels.
+_combined_phrases={key:value for key,value in EXACT.items()
+    if len(re.findall(r'[A-Za-z]+',key))>=2 and not re.search(r'[\u4e00-\u9fff]',key)}
+_combined_phrases.update(FRAGMENTS)
+_CHINESE_PHRASES=tuple(sorted(_combined_phrases.items(),key=lambda pair:len(pair[0]),reverse=True))
 _language = "zh_CN"
 _installed = False
 _retranslating = False
@@ -346,7 +370,10 @@ def translate(text):
     if text in reverse:
         return reverse[text]
     result = text
-    fragments = {value: key for key, value in FRAGMENTS.items()}
+    # A translated sentence ending (for example "。") is not a reversible
+    # phrase: replacing it globally would corrupt model labels and other data.
+    fragments = {value: key for key, value in FRAGMENTS.items()
+                 if re.search(r'[\u4e00-\u9fff]',value)}
     fragments.update(EN_FRAGMENTS)
     for source, target in sorted(fragments.items(), key=lambda pair: len(pair[0]), reverse=True):
         result = result.replace(source, target)

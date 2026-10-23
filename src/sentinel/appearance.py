@@ -135,6 +135,8 @@ class AppearanceManager(QObject):
     def apply_language(self,language):
         zh_cn.set_language(language,QApplication.instance())
         self.window.refresh_clock()
+        panel=getattr(self.window,"update_panel",None)
+        if panel is not None:panel.refresh_localized_release_notes()
         for card in self.window.provider_cards.values():card.fit_wrapped_text()
         self.window.schedule_card.fit_wrapped_text()
         self.window.presentation_changed.emit()

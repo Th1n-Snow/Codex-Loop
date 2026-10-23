@@ -38,6 +38,8 @@ class UpdatePanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+        from sentinel import zh_cn
+        zh_cn.set_language("en",cls.app)
 
     def make_panel(self, *, platform_name="Windows"):
         panel = UpdatePanel(

@@ -438,8 +438,9 @@ class LateProbeTests(unittest.TestCase):
         self.window.refresh_clock(now=now + 4)
         detail = self.window.diagnostic_text.text()
         self.assertIn("app_server_timeout", detail)
-        self.assertIn("Scheduled start blocked", detail)
-        self.assertIn("Recovered", detail)
+        self.assertIn("定时预热未通过检查", detail)
+        self.assertIn("已恢复", detail)
+        self.assertNotIn("Scheduled start blocked", detail)
         self.assertEqual(1, sum(row["phase"] == "blocked_start" for row in
                                 self.controller.error_history.recent_compatibility_events()))
         self.assertEqual([], self.controller.error_history.trigger_attempts())
