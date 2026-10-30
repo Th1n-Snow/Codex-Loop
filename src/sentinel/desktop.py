@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from .app_controller import ApplicationController
+from . import zh_cn
 from .activity import RecentStartsDialog
 from .app_state import (
     AppSettings,
@@ -60,7 +61,7 @@ from .provider_runtime import ProviderOperationResult
 from .providers import CompatibilityResult
 from .schedule import DAILY, WEEKLY, MULTI, schedule_summary
 from .multi_time_ui import MultiTimePanel
-from .diagnostics import technical_summary
+from .diagnostics import technical_summary, connection_issue_detail
 from .history import HistoryStateError
 from .ui_components import (
     Disclosure,
@@ -845,6 +846,7 @@ class MainWindow(QMainWindow):
             checking = self.active_operations.get("codex") == "probe"
             needs_check = (
                 not codex.automation_supported
+                or codex.status == "Needs attention"
                 or self.controller.settings.compatible_runtime_identities.get("codex") != codex.runtime_identity
             )
             self.recheck_dashboard_button.setVisible(
@@ -859,7 +861,7 @@ class MainWindow(QMainWindow):
                 if checking else
                 "Codex is not detected. Install and open Codex, then reopen Codex Loop."
                 if not codex.installed else
-                codex.detail if needs_check else
+                (connection_issue_detail(codex) or codex.detail) if needs_check else
                 "Compatibility confirmed. Your saved schedule and safety checks still apply."
             )
             self.schedule_card.update_schedule(
@@ -1469,7 +1471,7 @@ class DesktopShell:
         self.tray = QSystemTrayIcon(make_app_icon(), window)
         self.tray.setToolTip(window.current_tray_tooltip)
         self.window.tray_tooltip_changed.connect(self.tray.setToolTip)
-        self.window.notification_requested.connect(self.tray.showMessage)
+        self.window.notification_requested.connect(self.show_notification)
         menu = QMenu()
         self.status_action = menu.addAction(window.current_tray_tooltip)
         self.status_action.setEnabled(False)
@@ -1499,6 +1501,12 @@ class DesktopShell:
             application.aboutToQuit.connect(self.tray.hide)
         if self.tray_available:
             self.tray.show()
+
+    def show_notification(self, title: str, message: str) -> None:
+        # Qt can connect showMessage directly to its native slot, bypassing
+        # the Python translation wrapper. Translate at the delivery boundary
+        # using the current UI language, including after language switches.
+        self.tray.showMessage(zh_cn.translate(title), zh_cn.translate(message))
 
     def refresh_menu(self, *, now: float | None = None) -> None:
         current = time.time() if now is None else now

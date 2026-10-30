@@ -28,6 +28,22 @@ class HealthRow:
     detail: str
 
 
+def connection_issue_detail(state: ProviderViewState) -> str | None:
+    """Explain a failed read without exposing internal codes or assuming quota exhaustion."""
+    match = re.search(r'The check stopped safely \(([^)]+)\)', state.detail)
+    category = match[1] if match else state.compatibility_failure_category
+    if not category:
+        return None
+    reasons = {
+        'rate_limits_unavailable': 'Quota data could not be read. This does not mean your quota is exhausted.',
+        'app_server_timeout': 'The Codex connection timed out.',
+        'not_logged_in': 'Codex is not signed in.',
+        'runtime_not_found': 'The local Codex application could not be found.',
+    }
+    reason = reasons.get(category, 'The Codex connection check did not complete.')
+    return reason + '\n' + 'Check your network and Codex sign-in, then click Recheck Codex compatibility. Automatic warm-ups remain blocked until checks pass.'
+
+
 def provider_health(
     state: ProviderViewState,
     *,

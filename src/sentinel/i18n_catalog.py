@@ -279,6 +279,14 @@ MESSAGES = {'\n\nQuit Codex Loop first. Your settings and history are kept.': '\
  'version unavailable': '版本号不可用',
  'xhigh': '极高'}
 
+MESSAGES.update({
+ 'Quota data could not be read. This does not mean your quota is exhausted.': '暂时无法读取 Codex 额度数据，不代表额度已耗尽。',
+ 'The Codex connection timed out.': '连接 Codex 超时。',
+ 'Codex is not signed in.': 'Codex 尚未登录。',
+ 'The local Codex application could not be found.': '未找到本机 Codex 程序。',
+ 'The Codex connection check did not complete.': 'Codex 连接检查未能完成。',
+ 'Check your network and Codex sign-in, then click Recheck Codex compatibility. Automatic warm-ups remain blocked until checks pass.': '请检查网络并确认 Codex 已登录，然后点击“重新检查 Codex 兼容性”。检查通过前不会自动预热。',
+})
 PHRASES = {key: value for key, value in MESSAGES.items() if " " in key or "\n" in key}
 
 PHRASES["Recovered ("]="已恢复（"

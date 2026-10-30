@@ -129,10 +129,88 @@ class LocalizationCoverageTests(unittest.TestCase):
             ('Codex connection restored','Codex Loop can follow the saved schedule again. Safety checks still apply.')):
             self.assertChinese(zh_cn.translate(title+'\n'+body),'notification')
 
+    def test_disconnection_explains_reason_in_dashboard_and_settings(self):
+        raw='The check stopped safely (rate_limits_unavailable). Nothing was retried. See Settings for detail.'
+        failed=replace(self.base,status='Needs attention',detail=raw)
+        self.c.states={'codex':failed}
+        self.w.refresh_clock(now=self.now)
+        for page in (0,1):
+            self.w.show_page(page);self.app.processEvents();self.checkWidgets(self.w,'disconnected/page-'+str(page))
+        self.assertIn('暂时无法读取',self.w.compatibility_status.text())
+        self.assertIn('重新检查',self.w.compatibility_status.text())
+        self.assertNotIn('兼容性检查通过',self.w.compatibility_status.text())
+        p=operational_presentation(self.good,failed,now=self.now)
+        for text in (p.banner_detail,p.card_detail):
+            self.assertNotIn('rate_limits_unavailable',text)
+            self.assertIn('不代表额度已耗尽',zh_cn.translate(text))
+        self.assertIn('rate_limits_unavailable',self.w.diagnostic_text.text())
+        self.c.states={'codex':self.base};self.w.refresh_clock(now=self.now)
+        self.assertIn('兼容性检查通过',self.w.compatibility_status.text())
+        from sentinel.diagnostics import connection_issue_detail
+        for category in ('app_server_timeout','not_logged_in','runtime_not_found','unknown_future_error'):
+            value=replace(failed,detail=f'The check stopped safely ({category}). Nothing was retried. See Settings for detail.')
+            detail=connection_issue_detail(value)
+            self.assertNotIn(category,detail)
+            self.assertChinese(zh_cn.translate(detail),'connection/'+category)
+
     def test_sync_states_and_long_results(self):
         c=self.w.provider_cards['codex']
         for state_name in ('idle','syncing','updated','inconclusive','unavailable'):
             c.set_sync_state(state_name);self.checkWidgets(c,'sync/'+state_name)
+
+    def test_native_notification_delivery_uses_current_language(self):
+        from PySide6.QtWidgets import QSystemTrayIcon
+        # Keep the real Qt signal connection, but intercept the final native
+        # boundary after connecting. No OS notifications or Codex calls occur.
+        with patch.object(QSystemTrayIcon,'isSystemTrayAvailable',return_value=False):
+            shell=DesktopShell(self.w)
+        slot=getattr(shell,'show_notification',shell.tray.showMessage)
+        delivered=[]
+        pairs=(
+            ('Codex connection needs attention','Read-only retries ended. Automatic starts remain paused.',
+             'Codex 连接需要处理','只读重连已结束，自动预热仍暂停。'),
+            ('Scheduled start blocked','Codex needs a compatibility check. No start was sent.',
+             '定时预热未通过检查','需要重新检查 Codex 兼容性，未发送预热请求。'),
+            ('Codex connection restored','Codex Loop can follow the saved schedule again. Safety checks still apply.',
+             'Codex 连接已恢复','Codex Loop 可以继续按已保存的时间表运行，预热前仍会执行安全检查。'),
+            ('Codex connection needs attention','Automatic starts are paused. Recheck Codex when ready.',
+             'Codex 连接需要处理','自动预热已暂停，可重新检查 Codex 后继续。'),
+        )
+        producers=set()
+        for node in ast.walk(ast.parse((ROOT/'src/sentinel/desktop.py').read_text(encoding='utf-8'))):
+            if not isinstance(node,ast.Call) or not isinstance(node.func,ast.Attribute):continue
+            args=node.args[1:3] if node.func.attr=='_notify_compatibility' else (
+                node.args[:2] if node.func.attr=='emit' and isinstance(node.func.value,ast.Attribute)
+                and node.func.value.attr=='notification_requested' else ())
+            if len(args)==2 and all(isinstance(a,ast.Constant) and isinstance(a.value,str) for a in args):
+                producers.add(tuple(a.value for a in args))
+        self.assertEqual(producers,{(p[0],p[1]) for p in pairs},'Notification producer coverage changed')
+        try:
+            with patch.object(shell.tray,'showMessage',side_effect=lambda *args:delivered.append(args)):
+                for language in ('zh_CN','en','zh_CN'):
+                    self.w._language_selected(language)
+                    for title,body,zh_title,zh_body in pairs:
+                        with self.subTest(language=language,title=title,body=body):
+                            before=len(delivered)
+                            self.w.notification_requested.emit(title,body)
+                            self.app.processEvents()
+                            self.assertEqual(before+1,len(delivered),'Signal bypassed notification delivery adapter')
+                            expected=(zh_title,zh_body) if language=='zh_CN' else (title,body)
+                            self.assertEqual(expected,delivered[-1][:2])
+                            if language=='zh_CN':
+                                self.assertChinese('\n'.join(delivered[-1][:2]),'native-notification')
+                # A pending notification uses the language at delivery time.
+                title,body,zh_title,zh_body=pairs[0]
+                self.w._language_selected('en')
+                QTimer.singleShot(0,lambda:self.w.notification_requested.emit(title,body))
+                self.w._language_selected('zh_CN')
+                self.app.processEvents()
+                self.assertEqual((zh_title,zh_body),delivered[-1][:2])
+                out=ROOT/'artifacts/localization';out.mkdir(parents=True,exist_ok=True)
+                (out/'notifications.json').write_text(json.dumps({'message_pairs':len(pairs),'deliveries':len(delivered),'native_notifications_sent':0}),encoding='utf-8')
+        finally:
+            self.w.notification_requested.disconnect(slot)
+            shell.tray.hide();shell.tray.deleteLater()
     def test_history_all_saved_states_empty_and_corrupt(self):
         h=SafeHistory(Path(self.temp.name)/'history.jsonl')
         d=RecentStartsDialog(h);d.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,True);d.show();self.app.processEvents();self.checkWidgets(d,'history/empty')
@@ -226,7 +304,7 @@ class LocalizationCoverageTests(unittest.TestCase):
             for n in ast.walk(tree):
                 if not isinstance(n,ast.Constant) or not isinstance(n.value,str) or id(n) in docs:continue
                 text=n.value
-                if text in excluded or text.startswith(('%','http','QLineEdit','QPushButton')) or len(text)>2000:continue
+                if text in excluded or text == r'The check stopped safely \(([^)]+)\)' or text.startswith(('%','http','QLineEdit','QPushButton')) or len(text)>2000:continue
                 if len(re.findall(r'[A-Za-z]+',text))<2 or not (' ' in text or '\n' in text):continue
                 if '::' in text or r'\d' in text or 'return ' in text:continue
                 translated=zh_cn.translate(text);checked.add((name,n.lineno,text))

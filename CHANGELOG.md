@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.4 — 2026-10-30
+
+- Explain quota-read failures without exposing internal codes in the dashboard; show current connection failures in Settings and preserve raw diagnostics.
+- Translate native notification titles and bodies before Qt delivery using the current UI language.
+- Add disconnection/recovery and signal-to-notification regression coverage.
+
 ## 1.1.3 — 2026-10-23
 
 - Complete Chinese operational, background-error, update, dialog, history and tray translations.

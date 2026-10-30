@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from .app_state import AppSettings, ProviderViewState, format_countdown
 from .product import PRODUCT
+from .diagnostics import connection_issue_detail
 from .schedule import DAILY, WEEKLY, schedule_summary
 
 
@@ -86,8 +87,9 @@ def operational_presentation(
             (state.status == "Needs attention" or not state.automation_supported
              or (settings.checked_runtime_identities.get(state.provider_id) == state.runtime_identity
                  and settings.compatible_runtime_identities.get(state.provider_id) != state.runtime_identity))):
-        return make("needs_attention", "Codex Loop stopped safely", state.detail,
-                    "warning", "NEEDS ATTENTION", "Start blocked", state.detail,
+        detail = connection_issue_detail(state) or state.detail
+        return make("needs_attention", "Codex Loop stopped safely", detail,
+                    "warning", "NEEDS ATTENTION", "Start blocked", detail,
                     "Start blocked until Codex passes a compatibility check.",
                     tray="Needs attention")
     if not settings.automation_enabled:

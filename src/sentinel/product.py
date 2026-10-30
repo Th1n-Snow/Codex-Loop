@@ -100,7 +100,7 @@ class ProductMetadata:
 PRODUCT = ProductMetadata(
     display_name="Codex Loop",
     tagline="Codex quota warm-up",
-    version="1.1.3",
+    version="1.1.4",
     github_owner="Th1n-Snow",
     github_repo="Codex-Loop",
     executable_name="CodexLoop.exe",
